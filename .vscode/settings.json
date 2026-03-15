@@ -1,0 +1,25 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "[python]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "ms-python.python"
+  },
+  "files.associations": {
+    "*.yml": "ansible",
+    "hosts.ini": "ini",
+    "hosts.ini.example": "ini"
+  },
+  "editor.rulers": [100],
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/ansible/ansible-lint/main/src/ansiblelint/schemas/ansible.json#/$defs/playbook": "ansible/playbooks/**/*.yml"
+  },
+  "search.exclude": {
+    "pip-packages/**": true,
+    ".venv/**": true,
+    "venv/**": true,
+    "frontend/vendor/**": true
+  }
+}

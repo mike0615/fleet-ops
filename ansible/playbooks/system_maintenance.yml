@@ -1,0 +1,83 @@
+---
+###############################################################
+# Playbook : system_maintenance.yml
+# Purpose  : Routine Rocky 9 maintenance
+#            - dnf update all packages
+#            - Remove old kernels (keep 2)
+#            - Clean dnf cache + autoremove
+#            - Vacuum journal logs (30d)
+#            - Compress old log files
+#            - Report disk usage & failed services
+###############################################################
+
+- name: "System Maintenance — Rocky 9"
+  hosts: all
+  gather_facts: yes
+  become: yes
+  vars:
+    keep_kernels: 2
+    log_age_days: 30
+    disk_alert_pct: 80
+
+  tasks:
+
+    - name: Pre-maintenance disk usage
+      shell: df -hT
+      register: r_disk_before
+      changed_when: false
+
+    - name: Update all packages
+      dnf:
+        name: "*"
+        state: latest
+        update_cache: yes
+      register: r_update
+
+    - name: Remove old kernels
+      shell: >
+        dnf remove -y
+        $(dnf repoquery --installonly --latest-limit=-{{ keep_kernels }} -q 2>/dev/null)
+        2>/dev/null || true
+      changed_when: false
+
+    - name: DNF clean all
+      command: dnf clean all
+      changed_when: false
+
+    - name: DNF autoremove
+      shell: dnf autoremove -y 2>/dev/null || true
+      changed_when: false
+
+    - name: Vacuum journal (keep {{ log_age_days }}d)
+      shell: journalctl --vacuum-time={{ log_age_days }}d
+      changed_when: false
+
+    - name: Compress old rotated logs
+      shell: find /var/log -name "*.log" -mtime +{{ log_age_days }} -exec gzip -f {} \; 2>/dev/null || true
+      changed_when: false
+
+    - name: Remove very old compressed logs (90d)
+      shell: find /var/log -name "*.gz" -mtime +90 -delete 2>/dev/null || true
+      changed_when: false
+
+    - name: Check failed services
+      shell: systemctl --failed --no-pager --no-legend
+      register: r_failed_svcs
+      changed_when: false
+
+    - name: Disk usage alert check
+      shell: df -h | awk 'NR>1{gsub(/%/,"",$5); if($5+0>{{ disk_alert_pct }}) print $0}'
+      register: r_disk_alert
+      changed_when: false
+
+    - name: Post-maintenance disk usage
+      shell: df -hT
+      register: r_disk_after
+      changed_when: false
+
+    - name: Summary
+      debug:
+        msg:
+          - "Packages updated : {{ r_update.changed }}"
+          - "Failed services  : {{ r_failed_svcs.stdout | default('none') }}"
+          - "Disk alerts (>{{ disk_alert_pct }}%) : {{ r_disk_alert.stdout | default('none') }}"

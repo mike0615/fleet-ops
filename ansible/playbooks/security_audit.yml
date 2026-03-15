@@ -1,0 +1,326 @@
+---
+###############################################################
+# Playbook : security_audit.yml
+# Purpose  : Collect security logs and capture login info
+#            - Authentication logs (success + failure)
+#            - SSH access, authorized keys, sshd config
+#            - Sudo usage, SUID/SGID binaries
+#            - Firewall, SELinux, open ports
+#            - User accounts, password policy
+#            - Cron jobs, RPM integrity, audit daemon
+#            - Recently modified critical files
+# Output   : JSON report (mode 0600) fetched to reports/
+###############################################################
+
+- name: "Security Audit — Rocky 9"
+  hosts: all
+  gather_facts: yes
+  become: yes
+  vars:
+    report_dir:  "/opt/mac-ops/reports"
+    days_back:   7
+    ts:          "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
+    report_file: "{{ report_dir }}/security_{{ inventory_hostname }}_{{ ts }}.json"
+
+  tasks:
+
+    - name: Ensure report dir
+      file: { path: "{{ report_dir }}", state: directory, mode: "0755" }
+
+    # ── Auth Logs ────────────────────────────────────────────────
+    - name: last — recent logins
+      shell: last -F -n 200 2>/dev/null | head -100
+      register: r_last
+      changed_when: false
+
+    - name: Failed SSH login attempts
+      shell: >
+        grep -E 'Failed password|Invalid user|authentication failure'
+        /var/log/secure 2>/dev/null | tail -200
+        || journalctl -u sshd --since "{{ days_back }} days ago"
+           2>/dev/null | grep -E 'Failed|Invalid|error' | tail -200
+        || echo "(no data)"
+      register: r_failed
+      changed_when: false
+
+    - name: Accepted SSH logins
+      shell: >
+        grep 'Accepted' /var/log/secure 2>/dev/null | tail -100
+        || journalctl -u sshd --since "{{ days_back }} days ago"
+           2>/dev/null | grep 'Accepted' | tail -100
+        || echo "(no data)"
+      register: r_accepted
+      changed_when: false
+
+    - name: Currently logged-in users
+      shell: who
+      register: r_who
+      changed_when: false
+
+    - name: lastlog
+      shell: lastlog 2>/dev/null | grep -v 'Never logged in' | grep -v '^Username' | head -50
+      register: r_lastlog
+      changed_when: false
+
+    - name: faillock status
+      shell: faillock 2>/dev/null || echo "(faillock not available)"
+      register: r_faillock
+      changed_when: false
+
+    - name: wtmp history (last 50)
+      shell: last -50 2>/dev/null
+      register: r_wtmp
+      changed_when: false
+
+    # ── SSH Security ─────────────────────────────────────────────
+    - name: sshd_config effective
+      shell: sshd -T 2>/dev/null || grep -v '^#' /etc/ssh/sshd_config | grep -v '^$'
+      register: r_sshd_cfg
+      changed_when: false
+
+    - name: Find authorized_keys files
+      shell: find /home /root -name authorized_keys 2>/dev/null
+      register: r_authkeys_files
+      changed_when: false
+
+    - name: Read all authorized_keys
+      shell: |
+        for f in $(find /home /root -name authorized_keys 2>/dev/null); do
+          echo "=== $f ==="
+          cat "$f" 2>/dev/null
+        done
+      register: r_authkeys_content
+      changed_when: false
+
+    - name: SSH host key permissions
+      shell: ls -la /etc/ssh/ssh_host_* 2>/dev/null
+      register: r_hostkeys
+      changed_when: false
+
+    - name: User SSH private keys
+      shell: find /home /root -name "id_rsa" -o -name "id_ed25519" -o -name "id_ecdsa" 2>/dev/null | head -20
+      register: r_privkeys
+      changed_when: false
+
+    # ── Privilege Escalation ─────────────────────────────────────
+    - name: Sudo log
+      shell: >
+        grep -E 'sudo|COMMAND' /var/log/secure 2>/dev/null | tail -100
+        || journalctl -t sudo --since "{{ days_back }} days ago" 2>/dev/null | tail -100
+        || echo "(no sudo log)"
+      register: r_sudo_log
+      changed_when: false
+
+    - name: sudoers config
+      shell: cat /etc/sudoers 2>/dev/null; for f in /etc/sudoers.d/*; do echo "=== $f ==="; cat "$f" 2>/dev/null; done
+      register: r_sudoers
+      changed_when: false
+
+    - name: SUID files
+      shell: find / -perm /4000 -type f 2>/dev/null | sort
+      register: r_suid
+      changed_when: false
+
+    - name: SGID files
+      shell: find / -perm /2000 -type f 2>/dev/null | sort
+      register: r_sgid
+      changed_when: false
+
+    - name: World-writable dirs
+      shell: find / -type d -perm /o=w 2>/dev/null | grep -v '^/proc\|^/sys\|^/dev' | sort | head -50
+      register: r_wwdirs
+      changed_when: false
+
+    # ── System Security ──────────────────────────────────────────
+    - name: SELinux status
+      shell: sestatus 2>/dev/null || echo "(SELinux not available)"
+      register: r_selinux
+      changed_when: false
+
+    - name: Firewall
+      shell: >
+        firewall-cmd --state 2>/dev/null && firewall-cmd --list-all 2>/dev/null
+        || iptables -L -n -v 2>/dev/null
+        || echo "(no firewall)"
+      register: r_fw
+      changed_when: false
+
+    - name: Listening ports
+      shell: ss -tlnup
+      register: r_ports
+      changed_when: false
+
+    - name: Established connections
+      shell: ss -tnp state established 2>/dev/null
+      register: r_estab
+      changed_when: false
+
+    # ── User Account Security ────────────────────────────────────
+    - name: UID-0 users
+      shell: awk -F: '($3==0){print $1}' /etc/passwd
+      register: r_uid0
+      changed_when: false
+
+    - name: Empty or locked passwords
+      shell: awk -F: '($2==""||$2=="!"){print $1}' /etc/shadow 2>/dev/null || echo "(cannot read shadow)"
+      register: r_emptypw
+      changed_when: false
+
+    - name: Password policy
+      shell: >
+        cat /etc/security/pwquality.conf 2>/dev/null;
+        grep -E 'PASS_|LOGIN_' /etc/login.defs 2>/dev/null
+      register: r_pwpolicy
+      changed_when: false
+
+    - name: Account expiry
+      shell: >
+        for u in $(getent passwd | awk -F: '$3>=1000{print $1}'); do
+          echo "=== $u ==="; chage -l "$u" 2>/dev/null;
+        done
+      register: r_expiry
+      changed_when: false
+
+    # ── Cron Jobs ────────────────────────────────────────────────
+    - name: System cron
+      shell: |
+        echo "=== /etc/crontab ==="; cat /etc/crontab 2>/dev/null
+        echo "=== /etc/cron.d/ ==="; ls -la /etc/cron.d/ 2>/dev/null
+        for f in /etc/cron.d/*; do echo "--- $f ---"; cat "$f" 2>/dev/null; done
+        echo "=== cron.daily ===";   ls /etc/cron.daily/ 2>/dev/null
+        echo "=== cron.weekly ===";  ls /etc/cron.weekly/ 2>/dev/null
+        echo "=== cron.monthly ==="; ls /etc/cron.monthly/ 2>/dev/null
+      register: r_syscron
+      changed_when: false
+
+    - name: User crontabs
+      shell: |
+        for u in $(getent passwd | awk -F: '$3>=500{print $1}'); do
+          ct=$(crontab -l -u "$u" 2>/dev/null)
+          [ -n "$ct" ] && echo "=== $u ===" && echo "$ct"
+        done
+      register: r_usercron
+      changed_when: false
+
+    # ── Package & Update Security ────────────────────────────────
+    - name: Security updates available
+      shell: >
+        dnf check-update --security -q 2>/dev/null | tail -30
+        || yum check-update --security -q 2>/dev/null | tail -30
+        || echo "(cannot check)"
+      register: r_secupdates
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Recently installed packages (30d)
+      shell: rpm -qa --queryformat '%{INSTALLTIME:date}|%{NAME}-%{VERSION}\n' | sort -r | head -50
+      register: r_recentpkgs
+      changed_when: false
+
+    - name: RPM integrity check
+      shell: rpm -Va 2>/dev/null | grep -E '^[^.]' | head -50 || echo "(all OK)"
+      register: r_rpmva
+      changed_when: false
+
+    # ── Audit Daemon ─────────────────────────────────────────────
+    - name: auditd status
+      shell: systemctl status auditd 2>/dev/null || echo "(auditd not running)"
+      register: r_auditd
+      changed_when: false
+
+    - name: Recent audit events
+      shell: >
+        ausearch -m USER_LOGIN,USER_AUTH,USER_ACCT -ts recent 2>/dev/null | tail -100
+        || aureport --auth 2>/dev/null | tail -50
+        || echo "(no audit log)"
+      register: r_audit
+      changed_when: false
+
+    - name: Kernel security messages
+      shell: dmesg 2>/dev/null | grep -iE 'selinux|denied|secur|apparmor' | tail -50 || echo "(none)"
+      register: r_dmesg
+      changed_when: false
+
+    # ── Filesystem Security ──────────────────────────────────────
+    - name: Recently modified critical files (24h)
+      shell: >
+        find /etc /usr/bin /usr/sbin /bin /sbin -newer /tmp -type f 2>/dev/null
+        | head -50 || echo "(none)"
+      register: r_modfiles
+      changed_when: false
+
+    - name: Suspicious /tmp
+      shell: ls -la /tmp/ && ls -la /var/tmp/
+      register: r_tmp
+      changed_when: false
+
+    # ── Build & Write Report ─────────────────────────────────────
+    - name: Build security report
+      set_fact:
+        report:
+          report_type: "security_audit"
+          host:        "{{ inventory_hostname }}"
+          generated:   "{{ ansible_date_time.iso8601 }}"
+          os:          "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+          kernel:      "{{ ansible_kernel }}"
+          audit_days:  "{{ days_back }}"
+          authentication:
+            current_users:   "{{ r_who.stdout_lines }}"
+            recent_logins:   "{{ r_last.stdout_lines }}"
+            accepted_ssh:    "{{ r_accepted.stdout_lines }}"
+            failed_logins:   "{{ r_failed.stdout_lines }}"
+            lastlog:         "{{ r_lastlog.stdout_lines }}"
+            faillock:        "{{ r_faillock.stdout }}"
+            wtmp:            "{{ r_wtmp.stdout_lines }}"
+          ssh:
+            sshd_config:         "{{ r_sshd_cfg.stdout }}"
+            authorized_keys_files: "{{ r_authkeys_files.stdout_lines }}"
+            authorized_keys:     "{{ r_authkeys_content.stdout }}"
+            host_key_perms:      "{{ r_hostkeys.stdout }}"
+            user_privkeys:       "{{ r_privkeys.stdout_lines }}"
+          privilege:
+            sudo_log:      "{{ r_sudo_log.stdout_lines }}"
+            sudoers:       "{{ r_sudoers.stdout }}"
+            suid_files:    "{{ r_suid.stdout_lines }}"
+            sgid_files:    "{{ r_sgid.stdout_lines }}"
+            world_writable: "{{ r_wwdirs.stdout_lines }}"
+          system_security:
+            selinux:  "{{ r_selinux.stdout }}"
+            firewall: "{{ r_fw.stdout }}"
+            ports:    "{{ r_ports.stdout_lines }}"
+            established: "{{ r_estab.stdout_lines }}"
+          user_accounts:
+            uid0_users:    "{{ r_uid0.stdout_lines }}"
+            empty_passwords: "{{ r_emptypw.stdout_lines }}"
+            password_policy: "{{ r_pwpolicy.stdout }}"
+            expiry:        "{{ r_expiry.stdout }}"
+          cron:
+            system: "{{ r_syscron.stdout }}"
+            users:  "{{ r_usercron.stdout }}"
+          packages:
+            security_updates: "{{ r_secupdates.stdout }}"
+            recently_installed: "{{ r_recentpkgs.stdout_lines }}"
+            rpm_integrity: "{{ r_rpmva.stdout_lines }}"
+          audit:
+            auditd_status: "{{ r_auditd.stdout }}"
+            recent_events: "{{ r_audit.stdout }}"
+            kernel_msgs:   "{{ r_dmesg.stdout_lines }}"
+          filesystem:
+            modified_critical: "{{ r_modfiles.stdout_lines }}"
+            tmp_files:         "{{ r_tmp.stdout_lines }}"
+
+    - name: Write report (restricted)
+      copy:
+        content: "{{ report | to_nice_json }}"
+        dest:    "{{ report_file }}"
+        mode:    "0600"
+
+    - name: Fetch to controller
+      fetch:
+        src:  "{{ report_file }}"
+        dest: "/opt/mac-ops/reports/security_{{ inventory_hostname }}_{{ ts }}.json"
+        flat: yes
+
+    - name: Done
+      debug:
+        msg: "Security audit complete → {{ report_file }}"

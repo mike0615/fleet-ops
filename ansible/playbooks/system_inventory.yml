@@ -1,0 +1,329 @@
+---
+###############################################################
+# Playbook : system_inventory.yml
+# Purpose  : Complete system inventory of a Rocky 9 VM
+#            - Hardware resources (CPU, RAM, disk, PCI, USB)
+#            - Network interfaces, routes, ports, firewall
+#            - All installed software with versions
+#            - Docker containers, images, and network details
+#            - Users, groups, services, performance snapshot
+# Output   : JSON report fetched back to AnsibleOps reports/
+###############################################################
+
+- name: "System Inventory — Rocky 9"
+  hosts: all
+  gather_facts: yes
+  become: yes
+  vars:
+    report_dir: "/opt/mac-ops/reports"
+    ts: "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
+    report_file: "{{ report_dir }}/inventory_{{ inventory_hostname }}_{{ ts }}.json"
+
+  tasks:
+
+    # ── Prepare ─────────────────────────────────────────────────
+    - name: Ensure report dir exists
+      file: { path: "{{ report_dir }}", state: directory, mode: "0755" }
+
+    # ── Hardware ────────────────────────────────────────────────
+    - name: lscpu
+      shell: lscpu
+      register: r_lscpu
+      changed_when: false
+
+    - name: CPU model name
+      shell: grep 'model name' /proc/cpuinfo | head -1 | cut -d: -f2 | xargs
+      register: r_cpumodel
+      changed_when: false
+
+    - name: Memory free -h
+      shell: free -h
+      register: r_free
+      changed_when: false
+
+    - name: lsblk JSON
+      shell: lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,UUID -J 2>/dev/null || lsblk
+      register: r_lsblk
+      changed_when: false
+
+    - name: df -hT
+      shell: df -hT | grep -v 'tmpfs\|devtmpfs'
+      register: r_df
+      changed_when: false
+
+    - name: lspci
+      shell: lspci 2>/dev/null || echo "(lspci not available)"
+      register: r_lspci
+      changed_when: false
+
+    - name: lsusb
+      shell: lsusb 2>/dev/null || echo "(lsusb not available)"
+      register: r_lsusb
+      changed_when: false
+
+    - name: dmidecode system
+      shell: dmidecode -t system 2>/dev/null || echo "(dmidecode not available)"
+      register: r_dmi
+      changed_when: false
+
+    # ── Network ─────────────────────────────────────────────────
+    - name: ip addr (JSON)
+      shell: ip -j addr show 2>/dev/null || ip addr show
+      register: r_ipaddr
+      changed_when: false
+
+    - name: ip route
+      shell: ip route show
+      register: r_iproute
+      changed_when: false
+
+    - name: resolv.conf
+      shell: cat /etc/resolv.conf
+      register: r_dns
+      changed_when: false
+
+    - name: Firewall rules
+      shell: >
+        firewall-cmd --list-all 2>/dev/null
+        || iptables -L -n 2>/dev/null
+        || echo "(no firewall tool found)"
+      register: r_fw
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Listening ports
+      shell: ss -tlnup
+      register: r_ports
+      changed_when: false
+
+    - name: /etc/hosts
+      shell: cat /etc/hosts
+      register: r_hosts
+      changed_when: false
+
+    # ── OS ───────────────────────────────────────────────────────
+    - name: /etc/os-release
+      shell: cat /etc/os-release
+      register: r_osrelease
+      changed_when: false
+
+    - name: uptime
+      shell: uptime -p
+      register: r_uptime
+      changed_when: false
+
+    - name: timedatectl
+      shell: timedatectl status 2>/dev/null || date
+      register: r_time
+      changed_when: false
+
+    - name: uname -r
+      shell: uname -r
+      register: r_kernel
+      changed_when: false
+
+    # ── Installed Software ───────────────────────────────────────
+    - name: RPM packages
+      shell: >
+        rpm -qa --queryformat
+        '%{NAME}|%{VERSION}|%{RELEASE}|%{ARCH}|%{INSTALLTIME:date}\n' | sort
+      register: r_rpms
+      changed_when: false
+
+    - name: pip3 packages
+      shell: pip3 list --format=columns 2>/dev/null || echo "(pip3 not available)"
+      register: r_pip3
+      changed_when: false
+
+    - name: npm global packages
+      shell: npm list -g --depth=0 2>/dev/null || echo "(npm not available)"
+      register: r_npm
+      changed_when: false
+
+    - name: gem list
+      shell: gem list 2>/dev/null || echo "(gem not available)"
+      register: r_gem
+      changed_when: false
+
+    - name: Running systemd services
+      shell: systemctl list-units --type=service --state=running --no-pager --no-legend
+      register: r_svcs_running
+      changed_when: false
+
+    - name: All systemd unit files
+      shell: systemctl list-unit-files --type=service --no-pager --no-legend
+      register: r_svcs_all
+      changed_when: false
+
+    # ── Docker ───────────────────────────────────────────────────
+    - name: Check docker binary
+      command: which docker
+      register: r_docker_which
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Docker version
+      shell: docker version --format json 2>/dev/null || echo "{}"
+      register: r_docker_ver
+      changed_when: false
+      when: r_docker_which.rc == 0
+
+    - name: Docker info
+      shell: docker info --format json 2>/dev/null || echo "{}"
+      register: r_docker_info
+      changed_when: false
+      when: r_docker_which.rc == 0
+
+    - name: Docker containers (all)
+      shell: |
+        docker ps -a --format \
+          '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","created":"{{.CreatedAt}}","ports":"{{.Ports}}"}' \
+          2>/dev/null | jq -s '.' 2>/dev/null || echo "[]"
+      register: r_containers
+      changed_when: false
+      when: r_docker_which.rc == 0
+
+    - name: Docker images
+      shell: |
+        docker images --format \
+          '{"repo":"{{.Repository}}","tag":"{{.Tag}}","id":"{{.ID}}","created":"{{.CreatedAt}}","size":"{{.Size}}"}' \
+          2>/dev/null | jq -s '.' 2>/dev/null || echo "[]"
+      register: r_images
+      changed_when: false
+      when: r_docker_which.rc == 0
+
+    - name: Docker network inspect all
+      shell: |
+        docker network ls -q 2>/dev/null | while read nid; do
+          docker network inspect "$nid" 2>/dev/null
+        done | jq -s 'flatten' 2>/dev/null || echo "[]"
+      register: r_docker_nets
+      changed_when: false
+      when: r_docker_which.rc == 0
+
+    - name: Docker volumes
+      shell: docker volume ls --format json 2>/dev/null | jq -s '.' 2>/dev/null || echo "[]"
+      register: r_docker_vols
+      changed_when: false
+      when: r_docker_which.rc == 0
+
+    - name: Find docker-compose files
+      shell: find / -maxdepth 6 -name "docker-compose.y*ml" 2>/dev/null | head -20
+      register: r_compose
+      changed_when: false
+      when: r_docker_which.rc == 0
+
+    # ── Users ────────────────────────────────────────────────────
+    - name: Local users (uid ≥ 1000)
+      shell: getent passwd | awk -F: '$3>=1000{print $1"|"$3"|"$4"|"$5"|"$6"|"$7}'
+      register: r_users
+      changed_when: false
+
+    - name: Sudoers
+      shell: >
+        grep -rE '^[^#].*ALL' /etc/sudoers /etc/sudoers.d/ 2>/dev/null || echo ""
+      register: r_sudoers
+      changed_when: false
+
+    # ── Performance snapshot ─────────────────────────────────────
+    - name: loadavg
+      shell: cat /proc/loadavg
+      register: r_load
+      changed_when: false
+
+    - name: Top procs CPU
+      shell: ps aux --sort=-%cpu | head -11
+      register: r_topcpu
+      changed_when: false
+
+    - name: Top procs MEM
+      shell: ps aux --sort=-%mem | head -11
+      register: r_topmem
+      changed_when: false
+
+    # ── Assemble & Write Report ───────────────────────────────────
+    - name: Build report dict
+      set_fact:
+        report:
+          report_type: "system_inventory"
+          host:        "{{ inventory_hostname }}"
+          generated:   "{{ ansible_date_time.iso8601 }}"
+          hardware:
+            manufacturer: "{{ ansible_system_vendor | default('Unknown') }}"
+            product:      "{{ ansible_product_name  | default('Unknown') }}"
+            serial:       "{{ ansible_product_serial | default('Unknown') }}"
+            cpu:
+              model:   "{{ r_cpumodel.stdout }}"
+              vcpus:   "{{ ansible_processor_vcpus }}"
+              cores:   "{{ ansible_processor_cores }}"
+              count:   "{{ ansible_processor_count }}"
+              arch:    "{{ ansible_architecture }}"
+              lscpu:   "{{ r_lscpu.stdout }}"
+            memory:
+              total_mb: "{{ ansible_memtotal_mb }}"
+              free_mb:  "{{ ansible_memfree_mb }}"
+              swap_total_mb: "{{ ansible_swaptotal_mb }}"
+              swap_free_mb:  "{{ ansible_swapfree_mb }}"
+              free_output:   "{{ r_free.stdout }}"
+            storage:
+              lsblk: "{{ r_lsblk.stdout }}"
+              df:    "{{ r_df.stdout }}"
+            pci:  "{{ r_lspci.stdout }}"
+            usb:  "{{ r_lsusb.stdout }}"
+            dmi:  "{{ r_dmi.stdout }}"
+          network:
+            hostname: "{{ ansible_hostname }}"
+            fqdn:     "{{ ansible_fqdn }}"
+            ip_addr:  "{{ r_ipaddr.stdout }}"
+            routes:   "{{ r_iproute.stdout }}"
+            dns:      "{{ r_dns.stdout }}"
+            firewall: "{{ r_fw.stdout }}"
+            ports:    "{{ r_ports.stdout }}"
+            hosts:    "{{ r_hosts.stdout }}"
+          os:
+            distribution: "{{ ansible_distribution }}"
+            version:      "{{ ansible_distribution_version }}"
+            kernel:       "{{ r_kernel.stdout }}"
+            uptime:       "{{ r_uptime.stdout }}"
+            timezone:     "{{ r_time.stdout }}"
+            selinux:      "{{ ansible_selinux }}"
+            os_release:   "{{ r_osrelease.stdout }}"
+          software:
+            rpms:             "{{ r_rpms.stdout_lines }}"
+            pip3:             "{{ r_pip3.stdout }}"
+            npm:              "{{ r_npm.stdout }}"
+            gem:              "{{ r_gem.stdout }}"
+            services_running: "{{ r_svcs_running.stdout_lines }}"
+            services_all:     "{{ r_svcs_all.stdout_lines }}"
+          docker:
+            installed:       "{{ r_docker_which.rc == 0 }}"
+            version:         "{{ r_docker_ver.stdout      | default('{}') }}"
+            info:            "{{ r_docker_info.stdout     | default('{}') }}"
+            containers:      "{{ r_containers.stdout      | default('[]') }}"
+            images:          "{{ r_images.stdout          | default('[]') }}"
+            networks:        "{{ r_docker_nets.stdout     | default('[]') }}"
+            volumes:         "{{ r_docker_vols.stdout     | default('[]') }}"
+            compose_files:   "{{ r_compose.stdout_lines   | default([]) }}"
+          users:
+            local: "{{ r_users.stdout_lines }}"
+            sudo:  "{{ r_sudoers.stdout }}"
+          performance:
+            loadavg:     "{{ r_load.stdout }}"
+            top_cpu:     "{{ r_topcpu.stdout }}"
+            top_mem:     "{{ r_topmem.stdout }}"
+
+    - name: Write report on remote host
+      copy:
+        content: "{{ report | to_nice_json }}"
+        dest:    "{{ report_file }}"
+        mode:    "0644"
+
+    - name: Fetch report to controller
+      fetch:
+        src:  "{{ report_file }}"
+        dest: "/opt/mac-ops/reports/inventory_{{ inventory_hostname }}_{{ ts }}.json"
+        flat: yes
+
+    - name: Done
+      debug:
+        msg: "Inventory report saved → {{ report_file }}"

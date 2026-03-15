@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "redhat.ansible",
+    "redhat.vscode-yaml",
+    "ms-vscode.live-server",
+    "humao.rest-client",
+    "esbenp.prettier-vscode"
+  ]
+}

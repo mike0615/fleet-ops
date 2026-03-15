@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Environment & secrets
+.env
+.env.*
+*.key
+*.pem
+secrets/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Backup files
+*.old
+*.bak
+*.orig
