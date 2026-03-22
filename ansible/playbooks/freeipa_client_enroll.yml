@@ -1,0 +1,223 @@
+---
+###############################################################
+# Playbook : freeipa_client_enroll.yml
+# Purpose  : Enroll Rocky 9 hosts as FreeIPA clients
+#            Domain : lrn.sys
+#            Realm  : LRN.SYS
+#            Server : ipa01-main.lrn.sys
+#
+# Usage:
+#   ansible-playbook freeipa_client_enroll.yml \
+#     -i ../inventory/hosts.ini \
+#     --ask-vault-pass          # if using vault for ipa_enroll_password
+#
+# Prerequisites:
+#   - Target hosts must be able to resolve ipa01-main.lrn.sys
+#   - An enrollment principal must exist on the IPA server
+#   - Populate ipa_enroll_password in group_vars/ipa_clients.yml
+#     (encrypted with ansible-vault recommended)
+###############################################################
+
+- name: "FreeIPA Client Enrollment — Rocky 9 / lrn.sys"
+  hosts: ipa_clients
+  gather_facts: yes
+  become: yes
+
+  vars:
+    ipa_domain:         "lrn.sys"
+    ipa_realm:          "LRN.SYS"
+    ipa_server:         "ipa01-main.lrn.sys"
+    ipa_principal:      "admin"
+    # Store this in group_vars/ipa_clients.yml encrypted with ansible-vault
+    # ipa_enroll_password: "changeme"
+    ipa_mkhomedir:      true
+    ipa_configure_ntp:  true
+    ipa_ntp_server:     "ipa01-main.lrn.sys"
+    ipa_client_conf:    "/etc/ipa/default.conf"
+
+  pre_tasks:
+
+    - name: Verify OS is Rocky Linux 9
+      assert:
+        that:
+          - ansible_distribution == "Rocky"
+          - ansible_distribution_major_version == "9"
+        fail_msg: "This playbook requires Rocky Linux 9. Found: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        success_msg: "OS check passed: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Verify ipa_enroll_password is defined
+      assert:
+        that: ipa_enroll_password is defined and ipa_enroll_password | length > 0
+        fail_msg: >
+          ipa_enroll_password is not set.
+          Define it in group_vars/ipa_clients.yml (use ansible-vault to encrypt).
+
+    - name: Check if host is already enrolled
+      stat:
+        path: "{{ ipa_client_conf }}"
+      register: r_ipa_conf
+
+    - name: Enrollment status
+      debug:
+        msg: >
+          {{ inventory_hostname }} is
+          {{ 'already enrolled — skipping install' if r_ipa_conf.stat.exists else 'not enrolled — will enroll now' }}
+
+  tasks:
+
+    # ── Package prerequisites ────────────────────────────────────────────────
+
+    - name: Install freeipa-client and supporting packages
+      dnf:
+        name:
+          - freeipa-client
+          - oddjob
+          - oddjob-mkhomedir
+          - sssd
+          - sssd-ipa
+          - chrony
+        state: present
+        update_cache: yes
+      when: not r_ipa_conf.stat.exists
+
+    # ── Time synchronisation ─────────────────────────────────────────────────
+
+    - name: Configure chrony to use IPA server as NTP source
+      lineinfile:
+        path: /etc/chrony.conf
+        regexp: "^server {{ ipa_ntp_server }}"
+        line:   "server {{ ipa_ntp_server }} iburst"
+        insertbefore: "^server "
+        state: present
+      when:
+        - ipa_configure_ntp
+        - not r_ipa_conf.stat.exists
+      notify: Restart chronyd
+
+    - name: Enable and start chronyd
+      service:
+        name:    chronyd
+        enabled: yes
+        state:   started
+
+    - name: Force time sync before enrollment
+      command: chronyc makestep
+      changed_when: false
+      when: not r_ipa_conf.stat.exists
+
+    # ── Firewall ─────────────────────────────────────────────────────────────
+
+    - name: Ensure firewalld is running
+      service:
+        name:    firewalld
+        enabled: yes
+        state:   started
+
+    - name: Allow Kerberos traffic (TCP/UDP 88)
+      firewalld:
+        port:      "88/{{ item }}"
+        permanent: yes
+        state:     enabled
+        immediate: yes
+      loop:
+        - tcp
+        - udp
+
+    - name: Allow LDAP/LDAPS traffic
+      firewalld:
+        port:      "{{ item }}"
+        permanent: yes
+        state:     enabled
+        immediate: yes
+      loop:
+        - "389/tcp"
+        - "636/tcp"
+
+    - name: Allow DNS traffic (if host acts as resolver)
+      firewalld:
+        port:      "53/{{ item }}"
+        permanent: yes
+        state:     enabled
+        immediate: yes
+      loop:
+        - tcp
+        - udp
+
+    # ── IPA client install ────────────────────────────────────────────────────
+
+    - name: Run ipa-client-install
+      command: >
+        ipa-client-install
+        --domain={{ ipa_domain }}
+        --server={{ ipa_server }}
+        --realm={{ ipa_realm }}
+        --principal={{ ipa_principal }}
+        --password={{ ipa_enroll_password | quote }}
+        {{ '--mkhomedir' if ipa_mkhomedir else '--no-mkhomedir' }}
+        {{ '--ntp-server=' + ipa_ntp_server if ipa_configure_ntp else '--no-ntp' }}
+        --unattended
+      register:    r_ipa_install
+      changed_when: r_ipa_install.rc == 0
+      failed_when:  r_ipa_install.rc not in [0, 3]
+      # rc 3 = already configured — treat as ok
+      no_log: true   # suppress password from output
+      when: not r_ipa_conf.stat.exists
+
+    - name: IPA install result
+      debug:
+        msg: >
+          ipa-client-install rc={{ r_ipa_install.rc | default('skipped') }}
+          {{ '— already enrolled (rc=3)' if r_ipa_install.rc | default(0) == 3 else '' }}
+      when: not r_ipa_conf.stat.exists
+
+    # ── Post-enrolment services ───────────────────────────────────────────────
+
+    - name: Enable and start SSSD
+      service:
+        name:    sssd
+        enabled: yes
+        state:   started
+
+    - name: Enable and start oddjobd (auto-homedir creation)
+      service:
+        name:    oddjobd
+        enabled: yes
+        state:   started
+      when: ipa_mkhomedir
+
+    - name: Enable mkhomedir via authselect
+      command: authselect enable-feature with-mkhomedir
+      register: r_authselect
+      changed_when: "'already enabled' not in r_authselect.stderr"
+      when: ipa_mkhomedir
+
+    # ── Verification ──────────────────────────────────────────────────────────
+
+    - name: Verify IPA configuration file exists
+      stat:
+        path: "{{ ipa_client_conf }}"
+      register: r_verify
+
+    - name: Check Kerberos KDC reachability
+      command: "kinit -V -k -t /etc/krb5.keytab host/{{ ansible_fqdn }}"
+      register: r_kinit
+      changed_when: false
+      failed_when: false
+
+    - name: Enrollment summary
+      debug:
+        msg:
+          - "Host              : {{ inventory_hostname }} ({{ ansible_fqdn }})"
+          - "IPA domain        : {{ ipa_domain }}"
+          - "IPA realm         : {{ ipa_realm }}"
+          - "IPA server        : {{ ipa_server }}"
+          - "Config file found : {{ r_verify.stat.exists }}"
+          - "Kerberos kinit    : {{ 'OK' if r_kinit.rc == 0 else 'FAILED (rc=' + (r_kinit.rc | string) + ')' }}"
+          - "SSSD status       : {{ ansible_facts.services['sssd.service'].state | default('unknown') }}"
+
+  handlers:
+
+    - name: Restart chronyd
+      service:
+        name:  chronyd
+        state: restarted

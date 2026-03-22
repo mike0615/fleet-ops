@@ -1,0 +1,25 @@
+---
+###############################################################
+# group_vars/ipa_clients.yml
+# Variables for hosts in the [ipa_clients] inventory group.
+#
+# SECURITY: Encrypt ipa_enroll_password with ansible-vault:
+#   ansible-vault encrypt_string 'YourPassword' \
+#     --name 'ipa_enroll_password' >> group_vars/ipa_clients.yml
+#
+# Or encrypt the whole file:
+#   ansible-vault encrypt group_vars/ipa_clients.yml
+###############################################################
+
+# FreeIPA enrollment credentials
+# Replace the placeholder and encrypt with ansible-vault before committing.
+ipa_enroll_password: "{{ vault_ipa_enroll_password }}"
+
+# IPA connection settings (can be overridden per host in host_vars/)
+ipa_domain:        "lrn.sys"
+ipa_realm:         "LRN.SYS"
+ipa_server:        "ipa01-main.lrn.sys"
+ipa_principal:     "admin"
+ipa_mkhomedir:     true
+ipa_configure_ntp: true
+ipa_ntp_server:    "ipa01-main.lrn.sys"

@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% block title %}Kickstarts{% endblock %}
+{% block page_title %}Kickstart Files{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn-lrn ghost" onclick="openUploadKsModal()">
+    <i class="bi bi-upload"></i> Upload
+  </button>
+  <button class="btn-lrn primary" onclick="openNewKsModal()">
+    <i class="bi bi-plus-lg"></i> New Kickstart
+  </button>
+{% endblock %}
+
+{% block content %}
+
+{% if not ks_list %}
+<div class="lrn-card">
+  <div class="empty-state">
+    <i class="bi bi-file-code"></i>
+    <h5>No Kickstart Files Yet</h5>
+    <p>Kickstart files automate OS installations — no user input needed during setup.</p>
+    <div class="d-flex gap-2 justify-content-center mt-3">
+      <button class="btn-lrn ghost" onclick="openUploadKsModal()">
+        <i class="bi bi-upload"></i> Upload Existing
+      </button>
+      <button class="btn-lrn primary" onclick="openNewKsModal()">
+        <i class="bi bi-plus-lg"></i> Create New
+      </button>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="lrn-card">
+  <div class="lrn-card-header">
+    <div class="lrn-card-title"><i class="bi bi-file-code-fill"></i> Kickstart Files ({{ ks_list|length }})</div>
+    <div class="d-flex gap-2">
+      <button class="btn-lrn ghost" onclick="openUploadKsModal()"><i class="bi bi-upload"></i> Upload</button>
+      <button class="btn-lrn primary" onclick="openNewKsModal()"><i class="bi bi-plus-lg"></i> New</button>
+    </div>
+  </div>
+  <table class="lrn-table">
+    <thead>
+      <tr>
+        <th>Filename</th>
+        <th>Size</th>
+        <th>Modified</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ks in ks_list %}
+      <tr>
+        <td>
+          <div style="font-weight:600;display:flex;align-items:center;gap:8px;">
+            <i class="bi bi-file-code" style="color:var(--success-color);"></i>
+            {{ ks.name }}
+          </div>
+        </td>
+        <td>{{ ks.size }}</td>
+        <td>{{ ks.modified }}</td>
+        <td>
+          <div class="d-flex gap-2">
+            <button class="btn-lrn ghost" style="font-size:12px;padding:5px 10px;"
+                    onclick="editKickstart('{{ ks.name }}')">
+              <i class="bi bi-pencil-fill"></i> Edit
+            </button>
+            <a href="/kickstarts/{{ ks.name }}" target="_blank"
+               class="btn-lrn ghost" style="font-size:12px;padding:5px 10px;text-decoration:none;">
+              <i class="bi bi-eye-fill"></i> View
+            </a>
+            <button class="btn-lrn danger" style="font-size:12px;padding:5px 10px;"
+                    onclick="deleteKs('{{ ks.name }}')">
+              <i class="bi bi-trash3"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- ── What is a Kickstart? ──────────────────────────────────────────────── -->
+<div class="lrn-card">
+  <div class="lrn-card-header">
+    <div class="lrn-card-title"><i class="bi bi-lightbulb-fill" style="color:var(--warning-color);"></i> What is a Kickstart File?</div>
+  </div>
+  <p style="color:var(--sidebar-text);font-size:14px;margin:0;">
+    A kickstart file is a plain-text script that tells the installer exactly how to set up a machine — no clicking, no prompts.
+    It can define the language, keyboard, timezone, partitions, packages, user accounts, firewall rules, and more.
+    Once associated with a boot image in the <a href="{{ url_for('menu_builder_page') }}" style="color:var(--brand-color);">Menu Builder</a>,
+    machines that boot from that entry will install automatically.
+  </p>
+  <div class="mt-3">
+    <button class="btn-lrn ghost" onclick="loadTemplate('rocky9')">
+      <i class="bi bi-clipboard-plus"></i> Load Rocky 9 Template
+    </button>
+    <button class="btn-lrn ghost ms-2" onclick="loadTemplate('ubuntu')">
+      <i class="bi bi-clipboard-plus"></i> Load Ubuntu Template
+    </button>
+  </div>
+</div>
+
+<!-- ── New/Edit Modal ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="ksModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" style="color:var(--text-primary);" id="ksModalTitle">
+          <i class="bi bi-file-code-fill me-2" style="color:var(--success-color);"></i>New Kickstart
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="lrn-form-group">
+          <label>Filename</label>
+          <input type="text" class="lrn-input" id="ksName" placeholder="e.g. rocky9-webserver.ks">
+        </div>
+        <div class="lrn-form-group">
+          <label>Content</label>
+          <textarea class="lrn-input" id="ksContent" rows="24"
+                    style="font-family:monospace;font-size:13px;"
+                    placeholder="# Kickstart file content..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-lrn ghost" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-lrn primary" onclick="saveKickstart()">
+          <i class="bi bi-floppy-fill"></i> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Upload Modal ────────────────────────────────────────────────────── -->
+<div class="modal fade" id="uploadKsModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" style="color:var(--text-primary);">Upload Kickstart File</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="upload-zone" id="ksUploadZone">
+          <i class="bi bi-file-arrow-up-fill"></i>
+          <div class="upload-title">Drop .ks or .cfg file here</div>
+          <div class="upload-sub">or click to browse</div>
+        </div>
+        <input type="file" id="ksFileInput" accept=".ks,.cfg,.txt" style="display:none;">
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ksModal       = new bootstrap.Modal(document.getElementById('ksModal'));
+const uploadKsModal = new bootstrap.Modal(document.getElementById('uploadKsModal'));
+let editingKsName   = null;
+
+const ROCKY9_TEMPLATE = `#version=RHEL9
+# Rocky Linux 9 Kickstart Template
+# Generated by LRN_PXE
+
+# Installation method
+text
+url --url="http://SERVER_IP/mounts/rocky9/"
+
+# Locale
+lang en_US.UTF-8
+keyboard --vckeymap=us --xlayouts='us'
+timezone America/New_York --utc
+
+# Network
+network --bootproto=dhcp --device=link --activate
+network --hostname=rocky9-host
+
+# Root password (change this!)
+rootpw --iscrypted $6$CHANGEME
+
+# Users
+user --name=admin --groups=wheel --password=changeme
+
+# Security
+firewall --enabled --service=ssh
+selinux --enforcing
+authselect --useshadow --passalgo=sha512
+
+# Disk
+zerombr
+clearpart --all --initlabel
+autopart --type=lvm
+
+# Bootloader
+bootloader --location=mbr
+
+# Packages
+%packages
+@^minimal-environment
+@standard
+%end
+
+# Post-install
+%post
+systemctl enable sshd
+%end
+
+# Reboot after install
+reboot`;
+
+const UBUNTU_TEMPLATE = `# Ubuntu 22.04 Preseed Template
+# Generated by LRN_PXE
+
+d-i debian-installer/locale string en_US
+d-i keyboard-configuration/xkb-keymap select us
+d-i netcfg/choose_interface select auto
+d-i netcfg/get_hostname string ubuntu-host
+
+# Mirror
+d-i mirror/country string manual
+d-i mirror/http/hostname string SERVER_IP
+d-i mirror/http/directory string /mounts/ubuntu2204
+d-i mirror/http/proxy string
+
+# Time zone
+d-i time/zone string America/New_York
+d-i clock-setup/utc boolean true
+d-i clock-setup/ntp boolean true
+
+# Partitioning
+d-i partman-auto/method string lvm
+d-i partman-auto-lvm/guided_size string max
+d-i partman-lvm/confirm boolean true
+d-i partman/confirm boolean true
+d-i partman/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman-lvm/confirm boolean true
+d-i partman-lvm/confirm_nooverwrite boolean true
+
+# Root / user
+d-i passwd/root-login boolean false
+d-i passwd/user-fullname string Admin User
+d-i passwd/username string admin
+d-i passwd/user-password password changeme
+d-i passwd/user-password-again password changeme
+d-i passwd/user-default-groups string sudo
+
+# Packages
+tasksel tasksel/first multiselect standard, server
+d-i pkgsel/include string openssh-server
+
+# Bootloader
+d-i grub-installer/only_debian boolean true
+
+# Finish
+d-i finish-install/reboot_in_progress note`;
+
+function openNewKsModal() {
+  editingKsName = null;
+  document.getElementById('ksModalTitle').innerHTML =
+    '<i class="bi bi-file-code-fill me-2" style="color:var(--success-color);"></i>New Kickstart';
+  document.getElementById('ksName').value = '';
+  document.getElementById('ksName').disabled = false;
+  document.getElementById('ksContent').value = '';
+  ksModal.show();
+}
+
+function loadTemplate(type) {
+  openNewKsModal();
+  if (type === 'rocky9') {
+    document.getElementById('ksName').value = 'rocky9-auto.ks';
+    document.getElementById('ksContent').value = ROCKY9_TEMPLATE;
+  } else {
+    document.getElementById('ksName').value = 'ubuntu22-preseed.cfg';
+    document.getElementById('ksContent').value = UBUNTU_TEMPLATE;
+  }
+}
+
+async function editKickstart(name) {
+  editingKsName = name;
+  try {
+    const data = await api('GET', `/api/kickstarts/${name}`);
+    document.getElementById('ksModalTitle').innerHTML =
+      `<i class="bi bi-pencil-fill me-2" style="color:var(--warning-color);"></i>Edit: ${name}`;
+    document.getElementById('ksName').value = name;
+    document.getElementById('ksName').disabled = true;
+    document.getElementById('ksContent').value = data.content;
+    ksModal.show();
+  } catch (e) {
+    showToast('Failed to load kickstart: ' + e.message, 'error');
+  }
+}
+
+async function saveKickstart() {
+  const name    = document.getElementById('ksName').value.trim();
+  const content = document.getElementById('ksContent').value;
+  if (!name) { showToast('Please enter a filename', 'warning'); return; }
+
+  try {
+    if (editingKsName) {
+      await api('PUT', `/api/kickstarts/${editingKsName}`, { content });
+    } else {
+      await api('POST', '/api/kickstarts/upload', { name, content });
+    }
+    showToast('Kickstart saved!', 'success');
+    ksModal.hide();
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteKs(name) {
+  const confirmed = await confirmAction(`Delete <strong>${name}</strong>?`);
+  if (!confirmed) return;
+  try {
+    await api('DELETE', `/api/kickstarts/${name}`);
+    showToast(`${name} deleted`, 'success');
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initUploadZone(
+    document.getElementById('ksUploadZone'),
+    document.getElementById('ksFileInput'),
+    { accept: '.ks,.cfg,.txt', onFile: async file => {
+      try {
+        await uploadFile('/api/kickstarts/upload', file, () => {});
+        showToast(`${file.name} uploaded`, 'success');
+        uploadKsModal.hide();
+        setTimeout(() => location.reload(), 600);
+      } catch (e) {
+        showToast('Upload failed: ' + e.message, 'error');
+      }
+    }}
+  );
+});
+
+function openUploadKsModal() { uploadKsModal.show(); }
+</script>
+{% endblock %}

@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn-lrn primary" onclick="saveSettings()">
+    <i class="bi bi-floppy-fill"></i> Save Settings
+  </button>
+{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+
+  <!-- ── Network Settings ───────────────────────────────────────────────── -->
+  <div class="col-lg-6">
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-hdd-network-fill"></i> Network Settings</div>
+      </div>
+      <div class="lrn-form-group">
+        <label>PXE Server IP Address</label>
+        <input type="text" class="lrn-input" id="serverIp"
+               value="{{ settings.server_ip }}" placeholder="192.168.1.10">
+        <div style="font-size:12px;color:var(--sidebar-text);margin-top:4px;">
+          The IP address of this server on the PXE network.
+        </div>
+      </div>
+      <div class="lrn-form-group">
+        <label>Web UI Port</label>
+        <input type="number" class="lrn-input" id="webPort"
+               value="{{ settings.web_port }}" min="1024" max="65535">
+      </div>
+    </div>
+
+    <!-- ── DHCP Settings ──────────────────────────────────────────────── -->
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-router-fill"></i> DHCP Settings</div>
+        <div class="d-flex align-items-center gap-2">
+          <span style="font-size:13px;color:var(--sidebar-text);">Enabled</span>
+          <label class="lrn-toggle">
+            <input type="checkbox" id="dhcpEnabled" {% if settings.dhcp_enabled %}checked{% endif %}>
+            <span class="lrn-toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div id="dhcpFields">
+        <div class="lrn-form-group">
+          <label>Network Interface</label>
+          <input type="text" class="lrn-input" id="dhcpInterface"
+                 value="{{ settings.dhcp_interface }}" placeholder="eth0">
+        </div>
+        <div class="row g-3">
+          <div class="col-6">
+            <div class="lrn-form-group">
+              <label>DHCP Range Start</label>
+              <input type="text" class="lrn-input" id="dhcpStart"
+                     value="{{ settings.dhcp_start }}" placeholder="192.168.1.100">
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="lrn-form-group">
+              <label>DHCP Range End</label>
+              <input type="text" class="lrn-input" id="dhcpEnd"
+                     value="{{ settings.dhcp_end }}" placeholder="192.168.1.200">
+            </div>
+          </div>
+        </div>
+        <div class="lrn-form-group">
+          <label>Subnet Mask</label>
+          <input type="text" class="lrn-input" id="dhcpNetmask"
+                 value="{{ settings.dhcp_netmask }}" placeholder="255.255.255.0">
+        </div>
+        <div class="lrn-form-group">
+          <label>Default Gateway</label>
+          <input type="text" class="lrn-input" id="dhcpGateway"
+                 value="{{ settings.dhcp_gateway }}" placeholder="192.168.1.1">
+        </div>
+        <div class="lrn-form-group">
+          <label>DNS Server</label>
+          <input type="text" class="lrn-input" id="dhcpDns"
+                 value="{{ settings.dhcp_dns }}" placeholder="192.168.1.1">
+        </div>
+        <div class="lrn-form-group">
+          <label>Lease Time</label>
+          <select class="lrn-input lrn-select" id="dhcpLeaseTime">
+            {% for val, label in [('1h','1 Hour'),('4h','4 Hours'),('8h','8 Hours'),('12h','12 Hours'),('24h','24 Hours'),('48h','48 Hours')] %}
+            <option value="{{ val }}" {% if settings.dhcp_lease_time == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Services & Info ────────────────────────────────────────────────── -->
+  <div class="col-lg-6">
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-info-circle-fill"></i> Important Notes</div>
+      </div>
+      <div style="font-size:14px;color:var(--sidebar-text);line-height:1.8;">
+        <div class="mb-3">
+          <i class="bi bi-exclamation-triangle-fill" style="color:var(--warning-color);"></i>
+          <strong style="color:var(--text-primary);"> Restart required:</strong>
+          After changing DHCP or IP settings, restart the dnsmasq service from the Dashboard for changes to take effect.
+        </div>
+        <div class="mb-3">
+          <i class="bi bi-shield-fill" style="color:var(--brand-color);"></i>
+          <strong style="color:var(--text-primary);"> One DHCP server per network:</strong>
+          Only run this PXE server's DHCP if no other DHCP server is active on the same network segment. Conflicts cause connectivity issues.
+        </div>
+        <div>
+          <i class="bi bi-hdd-fill" style="color:var(--success-color);"></i>
+          <strong style="color:var(--text-primary);"> ISO storage:</strong>
+          ISOs are stored in <code style="color:var(--brand-color);">/opt/lrn_pxe/isos/</code>.
+          Ensure sufficient disk space before uploading large images.
+        </div>
+      </div>
+    </div>
+
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-terminal-fill"></i> Quick Commands</div>
+      </div>
+      <div style="font-size:13px;color:var(--sidebar-text);">Run these on the server via SSH:</div>
+      {% for label, cmd in [
+        ('View DHCP leases', 'cat /var/lib/dnsmasq/dnsmasq.leases'),
+        ('Restart all services', 'systemctl restart lrn-pxe dnsmasq nginx'),
+        ('View web UI logs', 'journalctl -u lrn-pxe -f'),
+        ('View DHCP logs', 'tail -f /var/log/dnsmasq.log'),
+        ('Rebuild iPXE', 'lrn-pxe build-ipxe'),
+        ('Regenerate menu', 'curl http://localhost:8080/menu.ipxe'),
+      ] %}
+      <div style="margin-top:12px;">
+        <div style="font-size:12px;color:var(--sidebar-text);margin-bottom:4px;">{{ label }}</div>
+        <div class="d-flex align-items-center gap-2">
+          <code style="flex:1;background:rgba(0,0,0,.3);padding:7px 10px;border-radius:6px;font-size:12px;color:var(--text-primary);">{{ cmd }}</code>
+          <button class="btn-lrn ghost" style="font-size:12px;padding:5px 8px;flex-shrink:0;"
+                  onclick="copyCmd(this, '{{ cmd }}')">
+            <i class="bi bi-clipboard"></i>
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- ── About ───────────────────────────────────────────────────────── -->
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-info-square-fill"></i> About LRN_PXE</div>
+      </div>
+      <div style="font-size:13px;color:var(--sidebar-text);line-height:1.8;">
+        <div><strong style="color:var(--text-primary);">Version:</strong> 1.0.0</div>
+        <div><strong style="color:var(--text-primary);">iPXE:</strong> bd13697 (bundled)</div>
+        <div><strong style="color:var(--text-primary);">Platform:</strong> Rocky Linux 9 / 10</div>
+        <div><strong style="color:var(--text-primary);">Stack:</strong> dnsmasq · nginx · Flask · Bootstrap 5</div>
+        <div class="mt-3" style="font-size:12px;">
+          LRN_PXE is an open-source network boot server designed for ease of use.
+          It supports BIOS and UEFI clients, automated kickstart installs, and
+          dynamic menu management through this web interface.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveSettings() {
+  const settings = {
+    server_ip:       document.getElementById('serverIp').value.trim(),
+    web_port:        parseInt(document.getElementById('webPort').value),
+    dhcp_enabled:    document.getElementById('dhcpEnabled').checked,
+    dhcp_interface:  document.getElementById('dhcpInterface').value.trim(),
+    dhcp_start:      document.getElementById('dhcpStart').value.trim(),
+    dhcp_end:        document.getElementById('dhcpEnd').value.trim(),
+    dhcp_netmask:    document.getElementById('dhcpNetmask').value.trim(),
+    dhcp_gateway:    document.getElementById('dhcpGateway').value.trim(),
+    dhcp_dns:        document.getElementById('dhcpDns').value.trim(),
+    dhcp_lease_time: document.getElementById('dhcpLeaseTime').value,
+    version: "1.0.0"
+  };
+
+  try {
+    await api('PUT', '/api/settings', settings);
+    showToast('Settings saved! Restart services from the Dashboard to apply changes.', 'success');
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+function copyCmd(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+    setTimeout(() => btn.innerHTML = orig, 1500);
+  });
+}
+</script>
+{% endblock %}

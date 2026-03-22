@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn-lrn ghost" onclick="refreshStatus()">
+    <i class="bi bi-arrow-clockwise"></i> Refresh
+  </button>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Stat Cards ─────────────────────────────────────────────────────── -->
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-icon blue"><i class="bi bi-disc-fill"></i></div>
+    <div>
+      <div class="stat-value" id="stat-isos">{{ iso_count }}</div>
+      <div class="stat-label">Boot Images</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon green"><i class="bi bi-file-code-fill"></i></div>
+    <div>
+      <div class="stat-value" id="stat-ks">{{ ks_count }}</div>
+      <div class="stat-label">Kickstart Files</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon purple"><i class="bi bi-list-check"></i></div>
+    <div>
+      <div class="stat-value" id="stat-menu">{{ menu_count }}</div>
+      <div class="stat-label">Menu Entries</div>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon yellow"><i class="bi bi-hdd-fill"></i></div>
+    <div>
+      <div class="stat-value">{{ disk.free }}</div>
+      <div class="stat-label">Disk Free</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- ── Service Status ─────────────────────────────────────────────── -->
+  <div class="col-lg-5">
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-activity"></i> Service Status</div>
+        <button class="btn-lrn ghost" style="font-size:12px;padding:5px 10px;" onclick="refreshStatus()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+
+      {% for svc, status in services.items() %}
+      <div class="d-flex align-items-center justify-content-between py-2"
+           style="border-bottom:1px solid var(--card-border);" id="svc-row-{{ svc }}">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:var(--text-primary);">
+            {% if svc == 'lrn-pxe' %}Web Interface
+            {% elif svc == 'dnsmasq' %}DHCP / TFTP
+            {% else %}HTTP Server{% endif %}
+          </div>
+          <div style="font-size:12px;color:var(--sidebar-text);">{{ svc }}</div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="svc-badge {{ status }}" id="svc-badge-{{ svc }}">
+            <span class="svc-dot"></span>
+            <span class="svc-name" style="display:none;">{{ svc }}</span>
+            <span class="svc-status">{{ status }}</span>
+          </span>
+          <button class="btn-lrn ghost" style="font-size:12px;padding:5px 8px;"
+                  onclick="restartService('{{ svc }}')" title="Restart">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+
+      <div class="mt-3">
+        <div style="font-size:12px;color:var(--sidebar-text);margin-bottom:6px;">Disk Usage — {{ disk.used }} / {{ disk.total }}</div>
+        <div class="disk-bar">
+          <div class="disk-bar-fill {{ 'high' if disk.pct > 85 else 'medium' if disk.pct > 60 else 'low' }}"
+               style="width:{{ disk.pct }}%"></div>
+        </div>
+        <div style="font-size:11px;color:var(--sidebar-text);margin-top:4px;">{{ disk.pct }}% used — {{ disk.free }} available</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Quick Start ────────────────────────────────────────────────── -->
+  <div class="col-lg-7">
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-rocket-takeoff-fill"></i> Quick Start</div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-sm-6">
+          <a href="{{ url_for('images_page') }}" class="d-block text-decoration-none">
+            <div class="quick-action-card">
+              <div class="qa-icon"><i class="bi bi-plus-circle-fill"></i></div>
+              <div class="qa-title">Add Boot Image</div>
+              <div class="qa-sub">Upload an ISO file to make it available for network booting</div>
+            </div>
+          </a>
+        </div>
+        <div class="col-sm-6">
+          <a href="{{ url_for('kickstarts_page') }}" class="d-block text-decoration-none">
+            <div class="quick-action-card">
+              <div class="qa-icon"><i class="bi bi-file-plus-fill"></i></div>
+              <div class="qa-title">Add Kickstart</div>
+              <div class="qa-sub">Create or upload a kickstart file for automated installs</div>
+            </div>
+          </a>
+        </div>
+        <div class="col-sm-6">
+          <a href="{{ url_for('menu_builder_page') }}" class="d-block text-decoration-none">
+            <div class="quick-action-card">
+              <div class="qa-icon"><i class="bi bi-list-task"></i></div>
+              <div class="qa-title">Build Boot Menu</div>
+              <div class="qa-sub">Arrange and configure what clients see when they PXE boot</div>
+            </div>
+          </a>
+        </div>
+        <div class="col-sm-6">
+          <a href="/menu.ipxe" target="_blank" class="d-block text-decoration-none">
+            <div class="quick-action-card">
+              <div class="qa-icon"><i class="bi bi-terminal-fill"></i></div>
+              <div class="qa-title">View Boot Script</div>
+              <div class="qa-sub">Preview the live iPXE menu script served to booting clients</div>
+            </div>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Server Info ─────────────────────────────────────────────────── -->
+  <div class="col-12">
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-info-circle-fill"></i> Server Information</div>
+      </div>
+      <div class="row g-3">
+        <div class="col-sm-4">
+          <div style="font-size:12px;color:var(--sidebar-text);margin-bottom:4px;">PXE Server IP</div>
+          <div style="font-size:15px;font-weight:600;color:var(--brand-color);font-family:monospace;">
+            {{ settings.server_ip }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div style="font-size:12px;color:var(--sidebar-text);margin-bottom:4px;">Web UI</div>
+          <div style="font-size:15px;font-weight:600;font-family:monospace;">
+            <a href="http://{{ settings.server_ip }}/" target="_blank" style="color:var(--brand-color);">
+              http://{{ settings.server_ip }}/
+            </a>
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div style="font-size:12px;color:var(--sidebar-text);margin-bottom:4px;">iPXE Boot Menu URL</div>
+          <div style="font-size:15px;font-weight:600;font-family:monospace;">
+            <a href="/menu.ipxe" target="_blank" style="color:var(--brand-color);">
+              http://{{ settings.server_ip }}/menu.ipxe
+            </a>
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div style="font-size:12px;color:var(--sidebar-text);margin-bottom:4px;">DHCP Range</div>
+          <div style="font-size:14px;font-weight:600;font-family:monospace;color:var(--text-primary);">
+            {{ settings.dhcp_start }} — {{ settings.dhcp_end }}
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div style="font-size:12px;color:var(--sidebar-text);margin-bottom:4px;">TFTP Root</div>
+          <div style="font-size:14px;font-weight:600;font-family:monospace;color:var(--text-primary);">
+            /var/lib/tftpboot
+          </div>
+        </div>
+        <div class="col-sm-4">
+          <div style="font-size:12px;color:var(--sidebar-text);margin-bottom:4px;">Menu Timeout</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text-primary);">
+            {{ menu.timeout }}s
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<style>
+.quick-action-card {
+  background: var(--sidebar-hover);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 18px;
+  height: 100%;
+  transition: border-color 0.2s, background 0.2s;
+}
+.quick-action-card:hover {
+  border-color: var(--brand-color);
+  background: rgba(79,142,247,.05);
+}
+.qa-icon { font-size: 22px; color: var(--brand-color); margin-bottom: 10px; }
+.qa-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+.qa-sub { font-size: 12px; color: var(--sidebar-text); line-height: 1.5; }
+</style>
+<script>
+async function refreshStatus() {
+  try {
+    const data = await api('GET', '/api/status');
+    // Update stats
+    if (data.iso_count !== undefined) document.getElementById('stat-isos').textContent = data.iso_count;
+    if (data.ks_count  !== undefined) document.getElementById('stat-ks').textContent   = data.ks_count;
+    if (data.menu_entries !== undefined) document.getElementById('stat-menu').textContent = data.menu_entries;
+    // Update service badges
+    Object.entries(data.services || {}).forEach(([name, status]) => {
+      const badge = document.getElementById('svc-badge-' + name);
+      if (badge) {
+        badge.className = `svc-badge ${status === 'active' ? 'active' : status === 'inactive' ? 'inactive' : 'unknown'}`;
+        badge.querySelector('.svc-status').textContent = status;
+      }
+    });
+    showToast('Status refreshed', 'info');
+  } catch (e) {
+    showToast('Failed to refresh: ' + e.message, 'error');
+  }
+}
+
+async function restartService(name) {
+  const confirmed = await confirmAction(`Restart <strong>${name}</strong>? This may briefly interrupt network booting.`);
+  if (!confirmed) return;
+  try {
+    await api('POST', `/api/service/${name}/restart`);
+    showToast(`${name} restarted`, 'success');
+    setTimeout(refreshStatus, 1500);
+  } catch (e) {
+    showToast('Restart failed: ' + e.message, 'error');
+  }
+}
+</script>
+{% endblock %}

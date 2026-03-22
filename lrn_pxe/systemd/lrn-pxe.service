@@ -1,0 +1,27 @@
+[Unit]
+Description=LRN_PXE Web Management Interface
+Documentation=https://github.com/your-org/mac-ops/lrn_pxe
+After=network.target nginx.service
+Wants=nginx.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/lrn_pxe/web
+Environment="FLASK_ENV=production"
+Environment="LRN_PXE_DIR=/opt/lrn_pxe"
+Environment="LRN_PXE_PORT=8080"
+ExecStart=/opt/lrn_pxe/venv/bin/python app.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=3
+StandardOutput=append:/opt/lrn_pxe/logs/web.log
+StandardError=append:/opt/lrn_pxe/logs/web_error.log
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

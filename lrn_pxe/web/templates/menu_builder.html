@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+{% block title %}Menu Builder{% endblock %}
+{% block page_title %}Menu Builder{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/menu.ipxe" target="_blank" class="btn-lrn ghost">
+    <i class="bi bi-eye-fill"></i> Preview Script
+  </a>
+  <button class="btn-lrn primary" onclick="saveMenuSettings()">
+    <i class="bi bi-floppy-fill"></i> Save Changes
+  </button>
+{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+
+  <!-- ── Menu Settings ─────────────────────────────────────────────────── -->
+  <div class="col-lg-4">
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-sliders"></i> Menu Settings</div>
+      </div>
+      <div class="lrn-form-group">
+        <label>Menu Title</label>
+        <input type="text" class="lrn-input" id="menuTitle"
+               value="{{ menu.title }}" placeholder="LRN_PXE Boot Menu">
+      </div>
+      <div class="lrn-form-group">
+        <label>Auto-boot Timeout <span style="color:var(--sidebar-text);font-weight:400;">(seconds, 0 = wait forever)</span></label>
+        <input type="number" class="lrn-input" id="menuTimeout"
+               value="{{ menu.timeout }}" min="0" max="300">
+      </div>
+      <div class="lrn-form-group">
+        <label>Default Selection <span style="color:var(--sidebar-text);font-weight:400;">(entry ID, leave blank for none)</span></label>
+        <select class="lrn-input lrn-select" id="menuDefault">
+          <option value="">— No default —</option>
+          {% for entry in menu.entries %}
+          <option value="{{ entry.id }}" {% if menu.default == entry.id %}selected{% endif %}>
+            {{ entry.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- ── Add Entry ──────────────────────────────────────────────────── -->
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-plus-circle-fill"></i> Add Menu Entry</div>
+      </div>
+      {% if not isos %}
+        <div style="text-align:center;padding:20px 0;color:var(--sidebar-text);font-size:13px;">
+          <i class="bi bi-disc" style="font-size:32px;display:block;margin-bottom:8px;opacity:0.4;"></i>
+          No boot images available.<br>
+          <a href="{{ url_for('images_page') }}" style="color:var(--brand-color);">Add an image first →</a>
+        </div>
+      {% else %}
+        <div class="lrn-form-group">
+          <label>Boot Image</label>
+          <select class="lrn-input lrn-select" id="newEntryIso">
+            <option value="">— Select image —</option>
+            {% for iso in isos %}
+            <option value="{{ iso.id }}" data-label="{{ iso.filename|replace('.iso','') }}">
+              {{ iso.filename }} {% if not iso.has_boot %}(⚠ no boot files){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="lrn-form-group">
+          <label>Display Label</label>
+          <input type="text" class="lrn-input" id="newEntryLabel" placeholder="e.g. Rocky Linux 9.4">
+        </div>
+        <div class="lrn-form-group">
+          <label>Kickstart File <span style="color:var(--sidebar-text);font-weight:400;">(optional)</span></label>
+          <select class="lrn-input lrn-select" id="newEntryKs">
+            <option value="">— None (interactive install) —</option>
+            {% for ks in ks_list %}
+            <option value="{{ ks.name }}">{{ ks.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="lrn-form-group">
+          <label>OS Type</label>
+          <select class="lrn-input lrn-select" id="newEntryOs">
+            <option value="rhel">Rocky / RHEL / AlmaLinux / CentOS</option>
+            <option value="ubuntu">Ubuntu / Debian</option>
+            <option value="fedora">Fedora</option>
+          </select>
+        </div>
+        <button class="btn-lrn primary w-100" onclick="addEntry()">
+          <i class="bi bi-plus-lg"></i> Add to Menu
+        </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── Menu Entries List ──────────────────────────────────────────────── -->
+  <div class="col-lg-8">
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title">
+          <i class="bi bi-list-check"></i> Menu Entries
+          <span style="color:var(--sidebar-text);font-weight:400;font-size:13px;margin-left:8px;">
+            Drag to reorder
+          </span>
+        </div>
+        <span class="badge-blue">{{ menu.entries|length }} entries</span>
+      </div>
+
+      {% if not menu.entries %}
+      <div class="empty-state" style="padding:40px 24px;">
+        <i class="bi bi-list-ul"></i>
+        <h5>No Menu Entries Yet</h5>
+        <p>Add a boot image from the panel on the left to get started.</p>
+      </div>
+      {% else %}
+      <div id="menuEntriesList">
+        {% for entry in menu.entries %}
+        <div class="menu-item-card" data-id="{{ entry.id }}" draggable="true">
+          <div class="menu-item-handle"><i class="bi bi-grip-vertical"></i></div>
+          <div class="menu-item-info">
+            <div class="menu-item-title">{{ entry.label }}</div>
+            <div class="menu-item-sub">
+              <span style="font-family:monospace;">{{ entry.iso_id }}</span>
+              {% if entry.kickstart %}
+                · <i class="bi bi-file-code" style="color:var(--success-color);"></i>
+                {{ entry.kickstart }}
+              {% else %}
+                · <span style="color:var(--sidebar-text);">Interactive install</span>
+              {% endif %}
+              · <span class="badge-{{ 'blue' if entry.os_type in ('rhel','rocky','almalinux') else 'yellow' }}">
+                  {{ entry.os_type }}
+                </span>
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <!-- Enable/disable toggle -->
+            <label class="lrn-toggle" title="{{ 'Disable' if entry.enabled else 'Enable' }} this entry">
+              <input type="checkbox" {% if entry.enabled %}checked{% endif %}
+                     onchange="toggleEntry('{{ entry.id }}', this.checked)">
+              <span class="lrn-toggle-slider"></span>
+            </label>
+            <!-- Edit button -->
+            <button class="btn-lrn ghost" style="font-size:12px;padding:5px 8px;"
+                    onclick="editEntry('{{ entry.id }}', {{ entry|tojson }})">
+              <i class="bi bi-pencil-fill"></i>
+            </button>
+            <!-- Delete button -->
+            <button class="btn-lrn danger" style="font-size:12px;padding:5px 8px;"
+                    onclick="deleteEntry('{{ entry.id }}', '{{ entry.label }}')">
+              <i class="bi bi-trash3"></i>
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ── Live Preview ───────────────────────────────────────────────── -->
+    <div class="lrn-card">
+      <div class="lrn-card-header">
+        <div class="lrn-card-title"><i class="bi bi-terminal-fill"></i> Live Menu Preview</div>
+        <button class="btn-lrn ghost" style="font-size:12px;padding:5px 10px;" onclick="refreshPreview()">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+      </div>
+      <pre class="code-block" id="menuPreview" style="max-height:300px;overflow-y:auto;">Loading...</pre>
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit Entry Modal ───────────────────────────────────────────────────── -->
+<div class="modal fade" id="editEntryModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" style="color:var(--text-primary);">
+          <i class="bi bi-pencil-fill me-2" style="color:var(--warning-color);"></i>Edit Menu Entry
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editEntryId">
+        <div class="lrn-form-group">
+          <label>Display Label</label>
+          <input type="text" class="lrn-input" id="editEntryLabel">
+        </div>
+        <div class="lrn-form-group">
+          <label>OS Type</label>
+          <select class="lrn-input lrn-select" id="editEntryOs">
+            <option value="rhel">Rocky / RHEL / AlmaLinux / CentOS</option>
+            <option value="ubuntu">Ubuntu / Debian</option>
+            <option value="fedora">Fedora</option>
+          </select>
+        </div>
+        <div class="lrn-form-group">
+          <label>Kickstart File <span style="color:var(--sidebar-text);font-weight:400;">(optional)</span></label>
+          <select class="lrn-input lrn-select" id="editEntryKs">
+            <option value="">— None (interactive install) —</option>
+            {% for ks in ks_list %}
+            <option value="{{ ks.name }}">{{ ks.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="lrn-form-group">
+          <label>Extra Kernel Arguments <span style="color:var(--sidebar-text);font-weight:400;">(optional)</span></label>
+          <input type="text" class="lrn-input" id="editEntryArgs" placeholder="e.g. console=ttyS0,115200n8">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-lrn ghost" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn-lrn primary" onclick="saveEditEntry()">
+          <i class="bi bi-floppy-fill"></i> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const editEntryModal = new bootstrap.Modal(document.getElementById('editEntryModal'));
+
+// ── Drag reorder ──────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const list = document.getElementById('menuEntriesList');
+  if (list) {
+    initDragReorder(list, async order => {
+      try {
+        await api('POST', '/api/menu/reorder', order);
+        showToast('Order saved', 'success');
+      } catch (e) {
+        showToast('Reorder failed: ' + e.message, 'error');
+      }
+    });
+  }
+  refreshPreview();
+
+  // Auto-fill label from ISO selection
+  document.getElementById('newEntryIso')?.addEventListener('change', e => {
+    const opt = e.target.options[e.target.selectedIndex];
+    const label = document.getElementById('newEntryLabel');
+    if (label && !label.value && opt.dataset.label) label.value = opt.dataset.label;
+  });
+});
+
+async function refreshPreview() {
+  try {
+    const res = await fetch('/menu.ipxe');
+    const text = await res.text();
+    document.getElementById('menuPreview').textContent = text;
+  } catch { document.getElementById('menuPreview').textContent = 'Failed to load preview.'; }
+}
+
+async function saveMenuSettings() {
+  const menu = await api('GET', '/api/menu');
+  menu.title   = document.getElementById('menuTitle').value.trim() || 'LRN_PXE Boot Menu';
+  menu.timeout = parseInt(document.getElementById('menuTimeout').value) || 60;
+  menu.default = document.getElementById('menuDefault').value;
+  try {
+    await api('PUT', '/api/menu', menu);
+    showToast('Menu settings saved!', 'success');
+    refreshPreview();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function addEntry() {
+  const iso_id   = document.getElementById('newEntryIso').value;
+  const label    = document.getElementById('newEntryLabel').value.trim();
+  const kickstart = document.getElementById('newEntryKs').value;
+  const os_type  = document.getElementById('newEntryOs').value;
+  if (!iso_id)  { showToast('Please select a boot image', 'warning'); return; }
+  if (!label)   { showToast('Please enter a display label', 'warning'); return; }
+  try {
+    await api('POST', '/api/menu/entries', { iso_id, label, kickstart, os_type, kernel_args: '', enabled: true });
+    showToast('Entry added to menu', 'success');
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
+}
+
+function editEntry(id, entry) {
+  document.getElementById('editEntryId').value    = id;
+  document.getElementById('editEntryLabel').value = entry.label || '';
+  document.getElementById('editEntryOs').value    = entry.os_type || 'rhel';
+  document.getElementById('editEntryKs').value    = entry.kickstart || '';
+  document.getElementById('editEntryArgs').value  = entry.kernel_args || '';
+  editEntryModal.show();
+}
+
+async function saveEditEntry() {
+  const id = document.getElementById('editEntryId').value;
+  const updates = {
+    label:       document.getElementById('editEntryLabel').value.trim(),
+    os_type:     document.getElementById('editEntryOs').value,
+    kickstart:   document.getElementById('editEntryKs').value,
+    kernel_args: document.getElementById('editEntryArgs').value.trim(),
+  };
+  try {
+    await api('PUT', `/api/menu/entries/${id}`, updates);
+    showToast('Entry updated', 'success');
+    editEntryModal.hide();
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    showToast('Update failed: ' + e.message, 'error');
+  }
+}
+
+async function toggleEntry(id, enabled) {
+  try {
+    await api('PUT', `/api/menu/entries/${id}`, { enabled });
+    refreshPreview();
+  } catch (e) {
+    showToast('Update failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteEntry(id, label) {
+  const confirmed = await confirmAction(`Remove <strong>${label}</strong> from the menu?`);
+  if (!confirmed) return;
+  try {
+    await api('DELETE', `/api/menu/entries/${id}`);
+    showToast('Entry removed', 'success');
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+</script>
+{% endblock %}

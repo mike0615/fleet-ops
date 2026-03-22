@@ -3,9 +3,9 @@
   "configurations": [
     {
       "name": "mac-ops Backend (Flask)",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["backend/app.py"],
-      "port": 5000
+      "runtimeExecutable": "C:\\Users\\mike\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+      "runtimeArgs": ["lrn_pxe/web/run_dev.py"],
+      "port": 8080
     }
   ]
 }
