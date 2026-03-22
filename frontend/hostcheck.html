@@ -1,0 +1,352 @@
+<!--
+  mac-ops — Host Checker
+  Author  : Mike Anderson  |  Version : 1.1.0
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Host Checker — mac-ops</title>
+<style>
+:root{
+  --bg0:#0d1117;--bg1:#161b22;--bg2:#1c2128;--bg3:#21262d;
+  --text0:#e6edf3;--text1:#b0bec5;--text2:#656d76;
+  --cyan:#4dd0e1;--green:#56d364;--red:#f85149;--amber:#e3b341;
+  --border:#30363d;
+  --mono:'Consolas','Courier New',monospace;
+  --ui:'Segoe UI','Helvetica Neue',Arial,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:var(--bg0);color:var(--text0);font-family:var(--ui);overflow:hidden}
+
+/* header */
+.hdr{height:46px;background:var(--bg1);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:12px;padding:0 16px;flex-shrink:0}
+.hdr-title{font-size:14px;font-weight:700;color:var(--cyan)}
+.hdr-sub{font-size:11px;color:var(--text2)}
+
+/* layout */
+.body{display:flex;height:calc(100vh - 46px)}
+
+/* left panel */
+.form-panel{
+  width:280px;flex-shrink:0;background:var(--bg1);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+}
+.form-inner{padding:16px;display:flex;flex-direction:column;gap:12px;flex:1}
+.fl{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px}
+.fhint{font-size:11px;color:var(--text2)}
+textarea.fi{
+  background:var(--bg0);border:1px solid var(--border);border-radius:5px;
+  padding:8px 10px;color:var(--text0);font-family:var(--mono);font-size:12px;
+  outline:none;resize:none;width:100%;height:140px;transition:border-color .2s;
+  line-height:1.5;
+}
+textarea.fi:focus{border-color:var(--cyan)}
+
+.btn-primary{
+  padding:9px;background:var(--cyan);color:#0d1117;border:none;
+  border-radius:5px;font-size:13px;font-weight:700;cursor:pointer;
+  font-family:var(--ui);transition:opacity .2s;
+}
+.btn-primary:hover:not(:disabled){opacity:.85}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed}
+
+.btn-ghost{
+  padding:7px;background:transparent;color:var(--text1);
+  border:1px solid var(--border);border-radius:5px;font-size:12px;
+  cursor:pointer;font-family:var(--ui);transition:all .2s;text-align:left;
+}
+.btn-ghost:hover{color:var(--cyan);border-color:var(--cyan)}
+
+/* summary row */
+.summary{
+  display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;
+  background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.summ-chip{
+  display:flex;align-items:center;gap:5px;
+  background:var(--bg3);border:1px solid var(--border);
+  border-radius:12px;padding:3px 10px;font-size:12px;
+}
+.summ-chip .dot{width:7px;height:7px;border-radius:50%}
+.dot-green{background:var(--green)}
+.dot-red{background:var(--red)}
+.dot-amber{background:var(--amber)}
+.dot-grey{background:var(--text2)}
+
+/* right panel */
+.out-panel{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.out-bar{
+  background:var(--bg2);border-bottom:1px solid var(--border);
+  padding:6px 14px;display:flex;align-items:center;gap:10px;
+  flex-shrink:0;font-size:12px;
+}
+#run-status{color:var(--text1)}
+.out-bar-right{margin-left:auto;display:flex;gap:8px}
+.btn-sm{
+  padding:3px 10px;background:transparent;border:1px solid var(--border);
+  color:var(--text2);border-radius:4px;font-size:11px;cursor:pointer;
+  font-family:var(--ui);transition:all .2s;
+}
+.btn-sm:hover{color:var(--text0);border-color:var(--text1)}
+
+/* results */
+#results-wrap{flex:1;overflow-y:auto}
+table{width:100%;border-collapse:collapse}
+thead th{
+  position:sticky;top:0;background:var(--bg2);
+  padding:8px 14px;text-align:left;font-size:11px;
+  color:var(--text2);text-transform:uppercase;letter-spacing:.5px;
+  border-bottom:1px solid var(--border);font-weight:600;
+}
+tbody tr{border-bottom:1px solid var(--bg3);transition:background .15s}
+tbody tr:hover{background:var(--bg2)}
+tbody td{padding:9px 14px;font-size:13px}
+td.host{font-family:var(--mono);color:var(--text0)}
+td.center{text-align:center}
+
+/* status badges */
+.badge{
+  display:inline-flex;align-items:center;gap:4px;
+  border-radius:10px;padding:2px 9px;font-size:11px;font-weight:600;
+}
+.badge-green{background:rgba(86,211,100,.1);color:var(--green);border:1px solid rgba(86,211,100,.3)}
+.badge-red  {background:rgba(248,81,73,.1); color:var(--red);  border:1px solid rgba(248,81,73,.3)}
+.badge-grey {background:rgba(101,109,118,.1);color:var(--text2);border:1px solid var(--border)}
+.badge-amber{background:rgba(227,179,65,.1);color:var(--amber);border:1px solid rgba(227,179,65,.3)}
+
+.progress-bar{
+  height:3px;background:var(--bg3);overflow:hidden;flex-shrink:0;
+}
+.progress-fill{height:100%;background:var(--cyan);width:0%;transition:width .3s}
+
+.empty-msg{padding:40px;text-align:center;color:var(--text2);font-size:13px}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <span style="font-size:18px">📡</span>
+  <div>
+    <div class="hdr-title">Host Checker</div>
+    <div class="hdr-sub">mac-ops — Ping, SSH and inventory reachability checks</div>
+  </div>
+</div>
+
+<div class="body">
+
+  <!-- ── Left panel ──────────────────────────────────────────────────────── -->
+  <div class="form-panel">
+    <div class="form-inner">
+      <div>
+        <label class="fl">Hosts to Check</label>
+        <textarea class="fi" id="inp-hosts"
+          placeholder="192.168.1.10&#10;192.168.1.11&#10;myserver.local&#10;&#10;One host per line"></textarea>
+        <div class="fhint" style="margin-top:4px">One hostname or IP per line</div>
+      </div>
+
+      <button class="btn-ghost" onclick="loadFromInventory()">
+        📋 Load all inventory hosts
+      </button>
+
+      <button class="btn-primary" id="check-btn" onclick="runCheck()">
+        📡 Check Hosts
+      </button>
+
+      <hr style="border:none;border-top:1px solid var(--border)">
+
+      <div style="font-size:11px;color:var(--text2);line-height:1.8">
+        <div style="color:var(--text1);margin-bottom:4px;font-size:12px">What gets checked</div>
+        <div><span style="color:var(--green)">●</span> ICMP ping (latency)</div>
+        <div><span style="color:var(--cyan)">●</span> TCP port 22 (SSH)</div>
+        <div><span style="color:var(--amber)">●</span> Listed in inventory</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Right panel ─────────────────────────────────────────────────────── -->
+  <div class="out-panel">
+    <div class="out-bar">
+      <span id="run-status">Enter hosts and click Check.</span>
+      <div class="out-bar-right">
+        <button class="btn-sm" onclick="copyResults()">⎘ Copy CSV</button>
+        <button class="btn-sm" onclick="clearResults()">✕ Clear</button>
+      </div>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+
+    <div id="summary-bar" class="summary" style="display:none"></div>
+
+    <div id="results-wrap">
+      <div class="empty-msg">📡 No results yet — enter hosts on the left and click Check.</div>
+    </div>
+  </div>
+
+</div><!-- /body -->
+
+<script>
+let lastResults = [];
+
+// ── Load inventory hosts ─────────────────────────────────────────────────────
+async function loadFromInventory() {
+  try {
+    const r = await fetch('/api/inventory');
+    const files = await r.json();
+    const hosts = new Set();
+    for (const f of files) {
+      const d = await fetch('/api/inventory/' + encodeURIComponent(f.name));
+      const j = await d.json();
+      const content = j.content || '';
+      // Extract hostnames/IPs: lines that aren't comments, headers or vars
+      content.split('\n').forEach(line => {
+        line = line.trim();
+        if (!line || line.startsWith('#') || line.startsWith('[')) return;
+        // ansible_host= override — use that IP
+        const m = line.match(/ansible_host=(\S+)/);
+        const host = m ? m[1] : line.split(/\s+/)[0];
+        if (host && !host.includes('=')) hosts.add(host);
+      });
+    }
+    document.getElementById('inp-hosts').value = [...hosts].join('\n');
+  } catch(e) {
+    alert('Could not load inventory: ' + e.message);
+  }
+}
+
+// ── Run check ────────────────────────────────────────────────────────────────
+async function runCheck() {
+  const raw = document.getElementById('inp-hosts').value;
+  const hosts = raw.split('\n').map(h => h.trim()).filter(Boolean);
+  if (!hosts.length) { alert('Enter at least one host.'); return; }
+
+  const btn = document.getElementById('check-btn');
+  btn.disabled = true; btn.textContent = '⏳ Checking…';
+  document.getElementById('run-status').textContent = `Checking ${hosts.length} host${hosts.length>1?'s':''}…`;
+  document.getElementById('summary-bar').style.display = 'none';
+  setProgress(10);
+
+  // Render skeleton rows immediately
+  renderSkeleton(hosts);
+
+  try {
+    const r = await fetch('/api/hostcheck', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ hosts }),
+    });
+    lastResults = await r.json();
+    setProgress(100);
+    renderResults(lastResults);
+    renderSummary(lastResults);
+    document.getElementById('run-status').textContent =
+      `Checked ${lastResults.length} host${lastResults.length>1?'s':''} — ${lastResults.filter(h=>h.ping).length} reachable`;
+  } catch(e) {
+    document.getElementById('run-status').textContent = 'Request failed: ' + e.message;
+  }
+
+  btn.disabled = false; btn.textContent = '📡 Check Hosts';
+  setTimeout(() => setProgress(0), 800);
+}
+
+// ── Render skeleton (immediate feedback) ─────────────────────────────────────
+function renderSkeleton(hosts) {
+  document.getElementById('results-wrap').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Host</th><th class="center">Ping</th>
+        <th class="center">SSH :22</th><th class="center">In Inventory</th>
+        <th class="center">Latency</th>
+      </tr></thead>
+      <tbody>
+        ${hosts.map(h => `
+          <tr>
+            <td class="host">${esc(h)}</td>
+            <td class="center"><span class="badge badge-grey">…</span></td>
+            <td class="center"><span class="badge badge-grey">…</span></td>
+            <td class="center"><span class="badge badge-grey">…</span></td>
+            <td class="center" style="color:var(--text2)">—</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ── Render final results ─────────────────────────────────────────────────────
+function renderResults(results) {
+  document.getElementById('results-wrap').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Host</th><th class="center">Ping</th>
+        <th class="center">SSH :22</th><th class="center">In Inventory</th>
+        <th class="center">Latency</th>
+      </tr></thead>
+      <tbody>
+        ${results.map(r => `
+          <tr>
+            <td class="host">${esc(r.host)}</td>
+            <td class="center">${badge(r.ping, 'Up', 'Down')}</td>
+            <td class="center">${badge(r.ssh,  'Open', 'Closed')}</td>
+            <td class="center">${badge(r.inventory, 'Yes', 'No', 'amber')}</td>
+            <td class="center" style="font-family:var(--mono);font-size:12px;color:var(--text1)">
+              ${r.latency != null ? r.latency.toFixed(1) + ' ms' : '—'}
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ── Summary chips ────────────────────────────────────────────────────────────
+function renderSummary(results) {
+  const up     = results.filter(r => r.ping).length;
+  const down   = results.length - up;
+  const ssh    = results.filter(r => r.ssh).length;
+  const inInv  = results.filter(r => r.inventory).length;
+
+  document.getElementById('summary-bar').style.display = 'flex';
+  document.getElementById('summary-bar').innerHTML = `
+    <div class="summ-chip"><div class="dot dot-green"></div>${up} reachable</div>
+    ${down ? `<div class="summ-chip"><div class="dot dot-red"></div>${down} unreachable</div>` : ''}
+    <div class="summ-chip"><div class="dot dot-grey" style="background:var(--cyan)"></div>${ssh} SSH open</div>
+    <div class="summ-chip"><div class="dot dot-amber"></div>${inInv} in inventory</div>
+    <div class="summ-chip" style="margin-left:auto;font-size:11px;color:var(--text2)">${results.length} total</div>
+  `;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function badge(val, yes, no, falseColor='red') {
+  return val
+    ? `<span class="badge badge-green">✓ ${yes}</span>`
+    : `<span class="badge badge-${falseColor}">✕ ${no}</span>`;
+}
+
+function setProgress(pct) {
+  document.getElementById('progress').style.width = pct + '%';
+}
+
+function clearResults() {
+  lastResults = [];
+  document.getElementById('results-wrap').innerHTML =
+    '<div class="empty-msg">📡 No results yet — enter hosts on the left and click Check.</div>';
+  document.getElementById('summary-bar').style.display = 'none';
+  document.getElementById('run-status').textContent = 'Enter hosts and click Check.';
+}
+
+function copyResults() {
+  if (!lastResults.length) return;
+  const lines = ['Host,Ping,SSH,In Inventory,Latency (ms)'];
+  lastResults.forEach(r => {
+    lines.push([r.host, r.ping?'Up':'Down', r.ssh?'Open':'Closed',
+                r.inventory?'Yes':'No',
+                r.latency!=null?r.latency.toFixed(1):''].join(','));
+  });
+  navigator.clipboard.writeText(lines.join('\n'))
+    .then(() => alert('Results copied to clipboard as CSV.'))
+    .catch(() => alert('Copy failed — try a modern browser.'));
+}
+
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+</body>
+</html>

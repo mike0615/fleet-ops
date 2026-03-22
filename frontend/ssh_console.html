@@ -1,0 +1,397 @@
+<!--
+  mac-ops — SSH Console
+  Author  : Mike Anderson
+  Version : 1.1.0
+  Deps    : xterm.js 5.3 (CDN), xterm-addon-fit 0.8 (CDN), socket.io 4.7 (CDN)
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SSH Console — mac-ops</title>
+
+<!-- xterm.js + socket.io loaded from CDN -->
+<link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<style>
+/* ── mac-ops dark theme ──────────────────────────────────────────────────── */
+:root{
+  --bg0:#0d1117;--bg1:#161b22;--bg2:#1c2128;--bg3:#21262d;
+  --text0:#e6edf3;--text1:#b0bec5;--text2:#656d76;
+  --cyan:#4dd0e1;--cyan-glow:rgba(77,208,225,.3);
+  --green:#56d364;--red:#f85149;--amber:#e3b341;
+  --border:#30363d;
+  --mono:'Consolas','Courier New',monospace;
+  --ui:'Segoe UI','Helvetica Neue',Arial,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:var(--bg0);color:var(--text0);font-family:var(--ui)}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.hdr{
+  height:46px;background:var(--bg1);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:12px;padding:0 16px;flex-shrink:0;
+}
+.hdr-logo{font-size:20px}
+.hdr-title{font-size:14px;font-weight:700;color:var(--cyan)}
+.hdr-sub{font-size:11px;color:var(--text2)}
+
+/* ── Main layout ─────────────────────────────────────────────────────────── */
+.layout{display:flex;flex-direction:column;height:calc(100vh - 46px)}
+
+/* ── Connection card ────────────────────────────────────────────────────── */
+#conn-panel{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  background:var(--bg0);
+}
+.conn-card{
+  background:var(--bg1);border:1px solid var(--border);border-radius:10px;
+  padding:28px 32px;width:400px;
+}
+.conn-hdr{
+  font-size:15px;font-weight:700;color:var(--text0);
+  margin-bottom:22px;display:flex;align-items:center;gap:8px;
+}
+.fg{margin-bottom:14px}
+.fl{
+  display:block;font-size:11px;color:var(--text2);
+  text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;
+}
+.fi{
+  width:100%;background:var(--bg0);border:1px solid var(--border);
+  border-radius:5px;padding:8px 10px;color:var(--text0);
+  font-family:var(--mono);font-size:13px;outline:none;
+  transition:border-color .2s;
+}
+.fi:focus{border-color:var(--cyan)}
+.row{display:flex;gap:10px}
+.row .fg{flex:1}
+.row .fg.port{flex:0 0 80px}
+
+/* password field + eye button */
+.pw-wrap{position:relative}
+.pw-wrap .fi{padding-right:38px}
+.eye-btn{
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  background:none;border:none;cursor:pointer;color:var(--text2);
+  font-size:15px;line-height:1;padding:2px;transition:color .2s;
+}
+.eye-btn:hover{color:var(--cyan)}
+
+/* connect button */
+.btn-connect{
+  width:100%;padding:10px;margin-top:4px;
+  background:var(--cyan);color:#0d1117;border:none;border-radius:5px;
+  font-size:14px;font-weight:700;cursor:pointer;font-family:var(--ui);
+  transition:opacity .2s;
+}
+.btn-connect:hover:not(:disabled){opacity:.85}
+.btn-connect:disabled{opacity:.4;cursor:not-allowed}
+
+.conn-err{
+  margin-top:10px;padding:9px 12px;
+  background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);
+  border-radius:5px;color:var(--red);font-size:12px;display:none;
+}
+
+/* ── Terminal panel ──────────────────────────────────────────────────────── */
+#term-panel{flex:1;display:none;flex-direction:column}
+
+.term-bar{
+  background:var(--bg2);border-bottom:1px solid var(--border);
+  padding:5px 12px;display:flex;align-items:center;gap:10px;
+  flex-shrink:0;font-size:12px;
+}
+.term-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--green);flex-shrink:0;
+  box-shadow:0 0 6px var(--green);
+  transition:background .3s;
+}
+.term-dot.off{background:var(--red);box-shadow:0 0 6px var(--red)}
+#term-info{color:var(--cyan);font-family:var(--mono);font-size:12px}
+.term-bar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.btn-disc{
+  background:rgba(248,81,73,.15);border:1px solid rgba(248,81,73,.3);
+  color:var(--red);border-radius:4px;padding:3px 10px;cursor:pointer;
+  font-size:11px;font-family:var(--ui);transition:background .2s;
+}
+.btn-disc:hover{background:rgba(248,81,73,.3)}
+
+#xterm-wrap{
+  flex:1;background:#000;overflow:hidden;padding:4px 4px 0 4px;
+}
+/* let xterm fill the wrapper */
+#xterm-wrap .xterm{height:100%}
+#xterm-wrap .xterm-viewport{overflow-y:auto!important}
+</style>
+</head>
+
+<body>
+<!-- Header -->
+<div class="hdr">
+  <span class="hdr-logo">🖥</span>
+  <div>
+    <div class="hdr-title">SSH Console</div>
+    <div class="hdr-sub">mac-ops — Maytag Ansible Console v1.1.0</div>
+  </div>
+</div>
+
+<div class="layout">
+
+  <!-- ── Connection form ───────────────────────────────────────────────── -->
+  <div id="conn-panel">
+    <div class="conn-card">
+      <div class="conn-hdr">🔐 Connect to Host</div>
+
+      <div class="row">
+        <div class="fg">
+          <label class="fl">Host / IP Address</label>
+          <input class="fi" id="inp-host" placeholder="192.168.1.10"
+                 autocomplete="off" spellcheck="false">
+        </div>
+        <div class="fg port">
+          <label class="fl">Port</label>
+          <input class="fi" id="inp-port" value="22" type="number" min="1" max="65535">
+        </div>
+      </div>
+
+      <div class="fg">
+        <label class="fl">Username</label>
+        <input class="fi" id="inp-user" placeholder="root"
+               autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="fg">
+        <label class="fl">Password</label>
+        <div class="pw-wrap">
+          <input class="fi" id="inp-pass" type="password"
+                 placeholder="••••••••" autocomplete="new-password">
+          <button class="eye-btn" id="eye-btn" onclick="togglePw()"
+                  title="Show / hide password" aria-label="Toggle password visibility">
+            👁
+          </button>
+        </div>
+      </div>
+
+      <button class="btn-connect" id="conn-btn" onclick="doConnect()">
+        Connect
+      </button>
+      <div class="conn-err" id="conn-err"></div>
+    </div>
+  </div>
+
+  <!-- ── Terminal panel ───────────────────────────────────────────────── -->
+  <div id="term-panel">
+    <div class="term-bar">
+      <div class="term-dot" id="term-dot"></div>
+      <span id="term-status">Connected</span>
+      <span id="term-info"></span>
+      <div class="term-bar-right">
+        <button class="btn-disc" onclick="doDisconnect()">⏏ Disconnect</button>
+      </div>
+    </div>
+    <div id="xterm-wrap"></div>
+  </div>
+
+</div><!-- /layout -->
+
+<script>
+// ── State ───────────────────────────────────────────────────────────────────
+let term = null;
+let fitAddon = null;
+let socket   = null;
+let isConnected = false;
+
+// ── xterm.js initialisation ─────────────────────────────────────────────────
+function initTerminal() {
+  if (term) return;
+
+  term = new Terminal({
+    theme: {
+      background:     '#000000',
+      foreground:     '#e6edf3',
+      cursor:         '#4dd0e1',
+      cursorAccent:   '#000000',
+      selectionBackground: 'rgba(77,208,225,0.25)',
+      black:          '#0d1117', brightBlack:   '#484f58',
+      red:            '#f85149', brightRed:     '#ff7b72',
+      green:          '#56d364', brightGreen:   '#7ee787',
+      yellow:         '#e3b341', brightYellow:  '#f0c000',
+      blue:           '#58a6ff', brightBlue:    '#79c0ff',
+      magenta:        '#d2a8ff', brightMagenta: '#e5b0ff',
+      cyan:           '#4dd0e1', brightCyan:    '#a5f3fc',
+      white:          '#b0bec5', brightWhite:   '#e6edf3',
+    },
+    fontFamily : "'Consolas','Courier New',monospace",
+    fontSize   : 13,
+    lineHeight : 1.3,
+    cursorBlink: true,
+    scrollback : 3000,
+    allowProposedApi: true,
+  });
+
+  fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(document.getElementById('xterm-wrap'));
+  fitAddon.fit();
+
+  // Send keystrokes to SSH
+  term.onData(data => {
+    if (socket && isConnected) socket.emit('input', { data });
+  });
+
+  // Notify backend of resize
+  window.addEventListener('resize', () => {
+    if (!fitAddon) return;
+    fitAddon.fit();
+    if (socket && isConnected)
+      socket.emit('resize', { cols: term.cols, rows: term.rows });
+  });
+}
+
+// ── Password eye toggle ──────────────────────────────────────────────────────
+function togglePw() {
+  const inp = document.getElementById('inp-pass');
+  const btn = document.getElementById('eye-btn');
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    btn.textContent = '🙈';
+    btn.title = 'Hide password';
+  } else {
+    inp.type = 'password';
+    btn.textContent = '👁';
+    btn.title = 'Show password';
+  }
+}
+
+// ── Error helper ─────────────────────────────────────────────────────────────
+function showErr(msg) {
+  const el = document.getElementById('conn-err');
+  el.textContent = '⚠ ' + msg;
+  el.style.display = 'block';
+}
+function clearErr() {
+  document.getElementById('conn-err').style.display = 'none';
+}
+
+// ── Connect ──────────────────────────────────────────────────────────────────
+function doConnect() {
+  const host = document.getElementById('inp-host').value.trim();
+  const port = parseInt(document.getElementById('inp-port').value) || 22;
+  const user = document.getElementById('inp-user').value.trim();
+  const pass = document.getElementById('inp-pass').value;
+
+  clearErr();
+  if (!host) { showErr('Host / IP address is required'); return; }
+  if (!user)  { showErr('Username is required'); return; }
+
+  const btn = document.getElementById('conn-btn');
+  btn.disabled    = true;
+  btn.textContent = 'Connecting…';
+
+  // Connect to the /ssh Socket.IO namespace on the same server
+  socket = io(window.location.origin + '/ssh',
+              { transports: ['websocket', 'polling'] });
+
+  socket.on('connect', () => {
+    socket.emit('connect_ssh', { host, port, username: user, password: pass });
+  });
+
+  socket.on('connected', () => {
+    isConnected = true;
+
+    // Show terminal, hide form
+    document.getElementById('conn-panel').style.display = 'none';
+    const tp = document.getElementById('term-panel');
+    tp.style.display = 'flex';
+
+    document.getElementById('term-info').textContent = `${user}@${host}:${port}`;
+    setStatus('Connected', false);
+
+    initTerminal();
+    fitAddon.fit();
+    // Sync terminal size with backend after layout settles
+    setTimeout(() => {
+      fitAddon.fit();
+      socket.emit('resize', { cols: term.cols, rows: term.rows });
+      term.focus();
+    }, 100);
+  });
+
+  socket.on('output', d => {
+    if (term) term.write(d.data);
+  });
+
+  socket.on('error', d => {
+    isConnected = false;
+    const inTerminal = document.getElementById('term-panel').style.display === 'flex';
+    if (inTerminal) {
+      term.writeln('\r\n\x1b[31m⚠ Error: ' + d.message + '\x1b[0m');
+      setStatus('Error', true);
+    } else {
+      showErr(d.message);
+      btn.disabled    = false;
+      btn.textContent = 'Connect';
+      socket.disconnect();
+      socket = null;
+    }
+  });
+
+  socket.on('disconnected', d => {
+    isConnected = false;
+    if (term)
+      term.writeln('\r\n\x1b[33m⏏ Disconnected: ' +
+                   (d.message || 'Connection closed') + '\x1b[0m');
+    setStatus('Disconnected', true);
+  });
+
+  socket.on('connect_error', () => {
+    isConnected = false;
+    showErr('Cannot reach the mac-ops backend. Is the service running?');
+    btn.disabled    = false;
+    btn.textContent = 'Connect';
+    socket = null;
+  });
+}
+
+// ── Disconnect ───────────────────────────────────────────────────────────────
+function doDisconnect() {
+  if (socket) { socket.disconnect(); socket = null; }
+  isConnected = false;
+
+  // Return to connection form
+  document.getElementById('term-panel').style.display   = 'none';
+  document.getElementById('conn-panel').style.display   = 'flex';
+
+  const btn = document.getElementById('conn-btn');
+  btn.disabled    = false;
+  btn.textContent = 'Connect';
+
+  // Clear password for security
+  document.getElementById('inp-pass').value  = '';
+  document.getElementById('eye-btn').textContent = '👁';
+  document.getElementById('inp-pass').type   = 'password';
+  clearErr();
+}
+
+// ── Status dot helper ────────────────────────────────────────────────────────
+function setStatus(text, isOff) {
+  document.getElementById('term-status').textContent = text;
+  const dot = document.getElementById('term-dot');
+  dot.className = 'term-dot' + (isOff ? ' off' : '');
+}
+
+// ── Allow Enter key on form fields ───────────────────────────────────────────
+['inp-host','inp-port','inp-user','inp-pass'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') doConnect();
+  });
+});
+</script>
+</body>
+</html>

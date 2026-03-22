@@ -3,7 +3,7 @@
 # mac-ops — Airgap Preparation Script
 # =============================================================================
 # Author  : Mike Anderson
-# Version : 1.1.0
+# Version : 1.2.0
 # License : MIT
 #
 # Run this script on a CONNECTED machine (same OS/arch as your airgapped target)
@@ -12,6 +12,11 @@
 # What it does:
 #   - Downloads all required pip wheel files into ./pip-packages/
 #   - These are bundled into the package for offline installation
+#
+# Packages bundled:
+#   flask, flask-cors, flask-socketio (SSH console WebSocket support)
+#   apscheduler (cron scheduling), pyyaml, paramiko (SSH console)
+#   ansible-core
 #
 # Usage:
 #   bash prep-airgap.sh
@@ -33,7 +38,7 @@ PKG_DIR="${SRC}/pip-packages"
 echo -e "${BLD}${CYN}"
 echo "  ╔═══════════════════════════════════════════╗"
 echo "  ║   mac-ops Airgap Package Preparation      ║"
-echo "  ║   Author: Mike Anderson · v1.1.0          ║"
+echo "  ║   Author: Mike Anderson · v1.2.0          ║"
 echo "  ╚═══════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -54,8 +59,10 @@ warn "This may take 2-5 minutes..."
 pip3 download \
     "flask>=3.0,<4" \
     "flask-cors>=4.0" \
+    "flask-socketio>=5.3,<6" \
     "apscheduler>=3.10,<4" \
     "pyyaml>=6.0" \
+    "paramiko>=3.0" \
     "ansible-core>=2.15" \
     --dest "$PKG_DIR" \
     --quiet

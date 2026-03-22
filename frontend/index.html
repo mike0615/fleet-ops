@@ -14,10 +14,10 @@
 <title>mac-ops — Maytag Ansible Console v1.1.0</title>
 <link rel="stylesheet" href="/vendor/codemirror/codemirror.min.css">
 <link rel="stylesheet" href="/vendor/codemirror/material-darker.min.css">
-<script src="/vendor/codemirror/codemirror.min.js"></script>
-<script src="/vendor/codemirror/yaml.min.js"></script>
-<script src="/vendor/codemirror/shell.min.js"></script>
-<script src="/vendor/codemirror/addons.min.js"></script>
+<script src="/vendor/codemirror/codemirror.min.js" defer></script>
+<script src="/vendor/codemirror/yaml.min.js" defer></script>
+<script src="/vendor/codemirror/shell.min.js" defer></script>
+<script src="/vendor/codemirror/addons.min.js" defer></script>
 <style>
 /* ═══════════════════════════ DESIGN TOKENS ═══════════════════════════════ */
 :root{
@@ -81,6 +81,7 @@ body.light .log-output{color:#2a3f55}
   display:flex;flex-direction:column;align-items:center;
   pointer-events:none;
 }
+.mascot-container.mascot-hidden{display:none}
 .mascot-img{
   width:90px;height:auto;
   transition:opacity .4s ease, transform .4s cubic-bezier(.34,1.56,.64,1);
@@ -481,6 +482,12 @@ body.light .logo-img{filter:brightness(0.85) saturate(1.2)}
       <span class="status-dot"></span>
       <span id="statusText">Connecting…</span>
     </div>
+    <label class="theme-toggle" title="Toggle mascot on/off">
+      <input type="checkbox" id="mascotToggle" checked onchange="toggleMascot(this.checked)">
+      <div class="toggle-track">
+        <div class="toggle-icons"><span>🙈</span><span>🤖</span></div>
+      </div>
+    </label>
     <label class="theme-toggle" title="Toggle light/dark mode">
       <input type="checkbox" id="themeToggle" onchange="toggleTheme(this.checked)">
       <div class="toggle-track">
@@ -513,6 +520,15 @@ body.light .logo-img{filter:brightness(0.85) saturate(1.2)}
   </div>
   <div class="nav-group">
     <div class="nav-label">Tools</div>
+    <div class="nav-item" onclick="window.open('/ssh-console','_blank','width=980,height=660,resizable=yes')">
+      <span class="nav-icon">🔒</span>SSH Console
+    </div>
+    <div class="nav-item" onclick="window.open('/adhoc','_blank','width=1000,height=680,resizable=yes')">
+      <span class="nav-icon">⚡</span>Ad-hoc Runner
+    </div>
+    <div class="nav-item" onclick="window.open('/hostcheck','_blank','width=960,height=640,resizable=yes')">
+      <span class="nav-icon">📡</span>Host Checker
+    </div>
   </div>
   <div class="sidebar-footer">
     <div style="font-size:10px;color:var(--text2);font-family:var(--mono)">mac-ops v1.1.0</div>
@@ -566,6 +582,8 @@ body.light .logo-img{filter:brightness(0.85) saturate(1.2)}
       <button class="btn btn-amber btn-sm" onclick="openRunModal()">▶ Run</button>
       <button class="btn btn-green btn-sm" onclick="savePB()">💾 Save</button>
       <button class="btn btn-ghost btn-sm" onclick="newFolder('playbooks')">📁 New Folder</button>
+      <button class="btn btn-ghost btn-sm" onclick="triggerPBUpload()">⬆ Upload</button>
+      <input type="file" id="pbUploadInput" accept=".yml,.yaml" multiple style="display:none" onchange="handlePBUpload(this)">
       <button class="btn btn-cyan" onclick="newPlaybook()">+ New</button>
     </div>
   </div>
@@ -808,27 +826,45 @@ function initEditors() {
 }
 
 // ── API ──────────────────────────────────────────────────────────────────
-async function apicall(path, method='GET', body=null) {
+// ms=0 disables the timeout (use for long-running ops like playbook runs)
+async function apicall(path, method='GET', body=null, ms=8000) {
+  const ctrl = new AbortController();
+  const timer = ms > 0 ? setTimeout(() => ctrl.abort(), ms) : null;
   try {
     const r = await fetch(API + path, {
       method,
       headers: {'Content-Type':'application/json'},
-      body: body ? JSON.stringify(body) : null
+      body: body ? JSON.stringify(body) : null,
+      signal: ctrl.signal
     });
+    if (timer) clearTimeout(timer);
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      return {error: `HTTP ${r.status} ${r.statusText}`};
+    }
     return await r.json();
-  } catch(e) { return {error: e.message}; }
+  } catch(e) {
+    if (timer) clearTimeout(timer);
+    return {error: e.message};
+  }
 }
 
 async function ping() {
   const el = document.getElementById('statusBadge');
   const tx = document.getElementById('statusText');
+  // Use AbortController + setTimeout for broad browser compatibility;
+  // AbortSignal.timeout() can silently fail on some Rocky Linux system browsers.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
-    const r = await fetch(API + '/api/dashboard', {signal: AbortSignal.timeout(3000)});
+    const r = await fetch(API + '/api/dashboard', {signal: ctrl.signal});
+    clearTimeout(timer);
     if (r.ok) {
       el.className = 'status-badge';
       tx.textContent = 'Backend Online';
-    } else throw 0;
+    } else throw new Error('HTTP ' + r.status);
   } catch {
+    clearTimeout(timer);
     el.className = 'status-badge offline';
     tx.textContent = 'Backend Offline';
   }
@@ -991,7 +1027,13 @@ async function openPB(name) {
 async function savePB() {
   if (!curPB) { toast('No file open', 'e'); return; }
   const r = await apicall('/api/playbooks/'+encodeURIComponent(curPB), 'PUT', {content: pbEditor.getValue()});
-  r.success ? toast('Saved '+curPB.split('/').pop(), 's') : toast('Save failed', 'e');
+  if (r && r.success) {
+    toast('Saved ' + curPB.split('/').pop(), 's');
+  } else {
+    const msg = (r && r.error) ? r.error : 'Save failed';
+    toast(msg, 'e');
+    console.error('[savePB]', msg);
+  }
 }
 
 async function validatePB() {
@@ -1013,6 +1055,57 @@ async function deletePB(name) {
   }
   loadPBs();
   toast('Deleted', 's');
+}
+
+function newPlaybook() {
+  qs('#newPBName').value = '';
+  qs('#newPBTpl').value  = 'blank';
+  openModal('newPBModal');
+}
+
+async function createPB() {
+  let name = qs('#newPBName').value.trim();
+  if (!name) { toast('Enter a filename', 'e'); return; }
+  if (!name.endsWith('.yml') && !name.endsWith('.yaml')) name += '.yml';
+  const tpls = {
+    blank:   `---\n# Playbook: ${name}\n# Author: Mike Anderson\n\n- name: My Playbook\n  hosts: all\n  become: yes\n  tasks:\n    - name: Example task\n      debug:\n        msg: "Hello from mac-ops"\n`,
+    basic:   `---\n# Playbook: ${name} — Gather Facts\n# Author: Mike Anderson\n\n- name: Gather System Facts\n  hosts: all\n  become: yes\n  gather_facts: yes\n  tasks:\n    - name: Display OS info\n      debug:\n        msg: "{{ ansible_distribution }} {{ ansible_distribution_version }}"\n`,
+    package: `---\n# Playbook: ${name} — Package Install\n# Author: Mike Anderson\n\n- name: Install Packages\n  hosts: all\n  become: yes\n  vars:\n    packages:\n      - vim\n      - git\n  tasks:\n    - name: Install packages via dnf\n      ansible.builtin.dnf:\n        name: "{{ packages }}"\n        state: present\n`,
+    service: `---\n# Playbook: ${name} — Service Management\n# Author: Mike Anderson\n\n- name: Manage Services\n  hosts: all\n  become: yes\n  vars:\n    service_name: httpd\n  tasks:\n    - name: Ensure service is running and enabled\n      ansible.builtin.service:\n        name: "{{ service_name }}"\n        state: started\n        enabled: yes\n`,
+    copy:    `---\n# Playbook: ${name} — File Copy\n# Author: Mike Anderson\n\n- name: Copy Files\n  hosts: all\n  become: yes\n  tasks:\n    - name: Copy file to remote\n      ansible.builtin.copy:\n        src: /path/to/local/file\n        dest: /path/on/remote\n        owner: root\n        group: root\n        mode: '0644'\n`,
+  };
+  const content = tpls[qs('#newPBTpl').value] || tpls.blank;
+  const r = await apicall('/api/playbooks/' + encodeURIComponent(name), 'PUT', {content});
+  if (r && r.error) { toast('Failed: ' + r.error, 'e'); return; }
+  closeModal('newPBModal');
+  await loadPBs();
+  openPB(name);
+  toast('Created ' + name, 's');
+}
+
+function triggerPBUpload() {
+  const inp = qs('#pbUploadInput');
+  inp.value = '';
+  inp.click();
+}
+
+async function handlePBUpload(input) {
+  const files = Array.from(input.files);
+  if (!files.length) return;
+  let ok = 0, fail = 0, lastName = null;
+  for (const file of files) {
+    const name = file.name;
+    try {
+      const content = await file.text();
+      const r = await apicall('/api/playbooks/' + encodeURIComponent(name), 'PUT', {content});
+      if (r && r.error) { fail++; }
+      else { ok++; lastName = name; }
+    } catch(e) { fail++; }
+  }
+  await loadPBs();
+  if (ok)   toast(`Uploaded ${ok} playbook${ok > 1 ? 's' : ''}`, 's');
+  if (fail) toast(`${fail} upload${fail > 1 ? 's' : ''} failed`, 'e');
+  if (ok === 1 && lastName) openPB(lastName);
 }
 
 async function newFolder(section) {
@@ -1069,7 +1162,13 @@ async function openINV(name) {
 async function saveINV() {
   if (!curINV) { toast('No file open', 'e'); return; }
   const r = await apicall('/api/inventory/'+encodeURIComponent(curINV), 'PUT', {content: invEditor.getValue()});
-  r.success ? toast('Saved '+curINV, 's') : toast('Save failed', 'e');
+  if (r && r.success) {
+    toast('Saved ' + curINV, 's');
+  } else {
+    const msg = (r && r.error) ? r.error : 'Save failed';
+    toast(msg, 'e');
+    console.error('[saveINV]', msg);
+  }
 }
 
 async function deleteINV(name) {
@@ -1325,7 +1424,7 @@ async function executeRun() {
   const btn = qs('#runExecBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Running…';
-  const r = await apicall('/api/playbooks/run','POST',{playbook:pb, inventory:inv, extra_vars:extra});
+  const r = await apicall('/api/playbooks/run','POST',{playbook:pb, inventory:inv, extra_vars:extra}, 0);
   btn.disabled = false;
   btn.innerHTML = '▶ Execute';
   const lines = (r.stdout || r.error || 'No output').split('\n');
@@ -1404,50 +1503,147 @@ const MASCOT_MAP = {
   running:    'normal',
 };
 
+// Each view/state can have multiple messages — one is picked at random each time.
 const MASCOT_MSGS = {
-  dashboard:  "MAC is ready! 🚀",
-  playbooks:  "Write some great YAML!",
-  inventory:  "Let's manage those hosts",
-  schedules:  "Automate everything!",
-  reports:    "Here's what I found…",
-  logs:       "Hmm, what happened?",
-  ai:         "MAC AI — ask away!",
-  settings:   "Configure away!",
-  success:    "Nailed it! ✓",
-  error:      "Uh oh… check the logs",
-  running:    "On it, one sec…",
+  dashboard:  ["MAC is ready! 🚀", "What are we automating today?", "All systems go!", "Your automation hub 🎛"],
+  playbooks:  ["Write some great YAML!", "Let's build a playbook!", "YAML time! 📋", "Which hosts are we targeting?"],
+  inventory:  ["Let's manage those hosts 🖥", "Who's in the fleet today?", "Add your managed hosts here."],
+  schedules:  ["Automate everything! ⏰", "Set it and forget it.", "Let the cron do the work!"],
+  reports:    ["Here's what I found… 📊", "Your system reports, fresh.", "Analyzing the data…"],
+  logs:       ["Hmm, what happened? 🔍", "Let's dig into these logs.", "The truth is in here somewhere."],
+  ai:         ["MAC AI — ask away! 🤖", "What would you like me to help with?"],
+  settings:   ["Configure away! ⚙", "Tweak things to your liking."],
+  success:    ["Nailed it! ✓", "Smooth sailing! 🎉", "All tasks completed!", "That worked perfectly!"],
+  error:      ["Uh oh… check the logs 🔍", "Something went sideways.", "Tip: Validate YAML before running!"],
+  running:    ["On it, one sec… ⚙", "Running the playbook… ☕", "Ansible is working its magic!", "Reaching your managed hosts…"],
 };
 
-let mascotTimer = null;
+// Tips shown on idle timeout or when the user clicks the mascot.
+// Each section has ansible / mac-ops specific advice.
+const MASCOT_TIPS = {
+  dashboard: [
+    "Tip: Copy the SSH public key at /home/macops/.ssh/ansible_key.pub to every managed host.",
+    "Tip: Use Quick Actions in the sidebar to jump straight to editing a playbook.",
+    "Tip: Green dot = success, red dot = failed in the recent runs list.",
+    "Tip: Head to Schedules to set up nightly automated runs.",
+    "Tip: Reports give you a snapshot of your fleet's state — try a facts playbook!",
+  ],
+  playbooks: [
+    "Tip: Press Ctrl+S to save without clicking the Save button.",
+    "Tip: Always Validate before running — catches YAML syntax errors instantly.",
+    "Tip: Use 'become: yes' to escalate privileges on managed hosts.",
+    "Tip: 'hosts: all' targets every host in your inventory.",
+    "Tip: 'gather_facts: no' speeds up playbooks that don't need host information.",
+    "Tip: Use 'when:' conditions to skip tasks based on OS or variables.",
+    "Tip: 'notify:' and 'handlers:' restart services only when something changed.",
+    "Tip: 'ansible.builtin.dnf' is the correct package module for Rocky Linux.",
+    "Tip: Store secrets with ansible-vault instead of plain text in playbooks.",
+    "Tip: Use tags and 'ansible-playbook --tags tagname' to run specific tasks only.",
+    "Tip: 'ignore_errors: yes' lets a playbook continue even if a task fails.",
+    "Tip: Use 'block:' and 'rescue:' for try/catch style error handling in YAML.",
+  ],
+  inventory: [
+    "Tip: Use [group_name] headers to organise hosts by role or environment.",
+    "Tip: Set ansible_host= to override the connection IP or hostname.",
+    "Tip: Set ansible_user= to control which SSH user Ansible logs in as.",
+    "Tip: [all:vars] applies settings to every host in the inventory.",
+    "Tip: Test connectivity any time with: ansible all -m ping",
+    "Tip: ansible_ssh_private_key_file= lets you specify a per-host SSH key.",
+    "Tip: [web:children] lets you nest groups inside a parent group.",
+    "Tip: ansible_become_pass= sets the sudo password if key-based sudo isn't configured.",
+    "Tip: Keep a 'production' and a 'staging' inventory file and swap between them.",
+  ],
+  schedules: [
+    "Tip: Cron format is 5 fields — minute hour day month weekday.",
+    "Tip: '0 2 * * *' runs at 2:00 AM every night.",
+    "Tip: '*/15 * * * *' runs every 15 minutes.",
+    "Tip: '0 9 * * 1' runs at 9 AM every Monday.",
+    "Tip: Pause a schedule with the toggle instead of deleting it.",
+    "Tip: Use scheduled runs for nightly patch checks or compliance scans.",
+    "Tip: '0 0 1 * *' runs at midnight on the first day of each month.",
+  ],
+  reports: [
+    "Tip: Reports are stored as JSON in /opt/mac-ops/reports/.",
+    "Tip: Run a gather_facts playbook to generate a full system report.",
+    "Tip: Compare reports over time to detect configuration drift.",
+    "Tip: Use reports to audit software versions across your whole fleet.",
+    "Tip: JSON reports are easy to parse with jq on the command line.",
+  ],
+  logs: [
+    "Tip: 'PLAY RECAP' at the bottom of a log shows the run summary.",
+    "Tip: failed=0 and unreachable=0 means everything went perfectly.",
+    "Tip: Logs live in /opt/mac-ops/logs/ on the server.",
+    "Tip: Check stderr for connection errors or permission denied messages.",
+    "Tip: 'changed=0' means the system was already in the desired state — idempotent!",
+    "Tip: Add '-v' or '-vvv' in your playbook run for more verbose output.",
+  ],
+  settings: [
+    "Tip: Leave the API URL blank when you are accessing the server directly.",
+    "Tip: Copy /home/macops/.ssh/ansible_key.pub to ~/.ssh/authorized_keys on each managed host.",
+    "Tip: Run 'systemctl restart mac-ops' after changing backend config.",
+    "Tip: Check 'journalctl -u mac-ops -f' to tail the service log in real time.",
+  ],
+};
 
-function setMascot(state, msg) {
+function mascotPickMsg(state) {
+  const arr = MASCOT_MSGS[state];
+  if (!arr) return '';
+  return Array.isArray(arr) ? arr[Math.floor(Math.random() * arr.length)] : arr;
+}
+
+function mascotPickTip(view) {
+  const arr = MASCOT_TIPS[view] || MASCOT_TIPS.dashboard;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+let mascotTimer = null;
+let mascotIdleTimer = null;
+let mascotCurrentView = 'dashboard';
+
+function setMascot(state, msg, duration=4500) {
   const img = document.getElementById('mascotImg');
   const bub = document.getElementById('mascotBubble');
+  if (!img || !bub) return;
   const imgKey = MASCOT_MAP[state] || 'normal';
   img.src = MASCOT_IMGS[imgKey];
-  bub.textContent = msg || MASCOT_MSGS[state] || '';
+  bub.textContent = msg || mascotPickMsg(state) || '';
   img.classList.remove('hidden');
   img.classList.add('visible');
   bub.classList.add('show');
   if (mascotTimer) clearTimeout(mascotTimer);
-  mascotTimer = setTimeout(() => {
-    bub.classList.remove('show');
-  }, 4000);
+  mascotTimer = setTimeout(() => bub.classList.remove('show'), duration);
 }
 
-// Override showView to update mascot
+// Show a tip for the current view (longer display so it is readable)
+function mascotShowTip(view) {
+  const tip = mascotPickTip(view || mascotCurrentView);
+  setMascot(mascotCurrentView, tip, 7000);
+}
+
+// Idle tip: after 30s of no user activity, offer a tip
+function mascotResetIdle() {
+  if (mascotIdleTimer) clearTimeout(mascotIdleTimer);
+  mascotIdleTimer = setTimeout(() => mascotShowTip(mascotCurrentView), 30000);
+}
+['mousemove','keydown','mousedown','touchstart','scroll'].forEach(ev =>
+  document.addEventListener(ev, mascotResetIdle, {passive: true})
+);
+
+// Override showView to update mascot and track current view
 const _origShowView = showView;
 window.showView = function(name) {
   _origShowView(name);
+  mascotCurrentView = name;
   setMascot(name);
+  mascotResetIdle();
 };
 
 // Override toast to show mascot reactions
 const _origToast = toast;
 window.toast = function(msg, type='i') {
   _origToast(msg, type);
-  if (type === 's') setMascot('success', msg.length < 40 ? msg : MASCOT_MSGS.success);
-  else if (type === 'e') setMascot('error', MASCOT_MSGS.error);
+  if (type === 's') setMascot('success', msg.length < 40 ? msg : mascotPickMsg('success'));
+  else if (type === 'e') setMascot('error', mascotPickMsg('error'));
 };
 
 // Override executeRun to update mascot
@@ -1457,25 +1653,44 @@ window.executeRun = async function() {
   await _origExecuteRun();
 };
 
-// Init mascot on load
+// Click the mascot image to get a tip for the current view
 window.addEventListener('DOMContentLoaded', () => {
-  setTimeout(() => setMascot('dashboard'), 800);
+  const img = document.getElementById('mascotImg');
+  if (img) {
+    img.style.cursor = 'pointer';
+    img.style.pointerEvents = 'auto';
+    img.title = 'Click me for a tip!';
+    img.addEventListener('click', () => mascotShowTip(mascotCurrentView));
+  }
+  setTimeout(() => { setMascot('dashboard'); mascotResetIdle(); }, 800);
 });
 
 // ── Theme toggle ───────────────────────────────────────────────────────────
 function toggleTheme(isLight) {
   document.body.classList.toggle('light', isLight);
   localStorage.setItem('ao_theme', isLight ? 'light' : 'dark');
-  // Update mascot bubble style in light mode handled by CSS vars
 }
 
-// Restore saved theme on load
+function toggleMascot(visible) {
+  const container = document.getElementById('mascotContainer');
+  if (container) container.classList.toggle('mascot-hidden', !visible);
+  localStorage.setItem('ao_mascot', visible ? 'on' : 'off');
+}
+
+// Restore saved theme and mascot preference on load
 (function() {
-  const saved = localStorage.getItem('ao_theme');
-  if (saved === 'light') {
+  const theme = localStorage.getItem('ao_theme');
+  if (theme === 'light') {
     document.body.classList.add('light');
     const tog = document.getElementById('themeToggle');
     if (tog) tog.checked = true;
+  }
+  const mascot = localStorage.getItem('ao_mascot');
+  if (mascot === 'off') {
+    const container = document.getElementById('mascotContainer');
+    if (container) container.classList.add('mascot-hidden');
+    const tog = document.getElementById('mascotToggle');
+    if (tog) tog.checked = false;
   }
 })();
 </script>

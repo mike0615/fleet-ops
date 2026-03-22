@@ -31,11 +31,15 @@ import subprocess
 import datetime
 import logging
 import yaml
+import select
+import threading
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+import paramiko
 
 # ─── Path layout ─────────────────────────────────────────────────────────────
 BASE        = Path(__file__).resolve().parent.parent
@@ -64,6 +68,12 @@ log.info("mac-ops v1.1.0 starting — Author: Mike Anderson")
 # ─── App ──────────────────────────────────────────────────────────────────────
 app = Flask(__name__, static_folder=str(FRONTEND), static_url_path="")
 CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading',
+                    logger=False, engineio_logger=False)
+
+# Active SSH sessions keyed by Socket.IO session ID
+_ssh_sessions: dict = {}
+_ssh_lock = threading.Lock()
 
 # ─── Scheduler ────────────────────────────────────────────────────────────────
 scheduler = BackgroundScheduler(daemon=True)
@@ -80,7 +90,15 @@ def load_schedules() -> list:
 
 
 def save_schedules(data: list) -> None:
-    SCHED_FILE.write_text(json.dumps(data, indent=2))
+    try:
+        SCHED_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SCHED_FILE.write_text(json.dumps(data, indent=2))
+    except PermissionError as exc:
+        log.error("Permission denied writing schedules.json: %s", exc)
+        raise
+    except Exception as exc:
+        log.error("Error writing schedules.json: %s", exc)
+        raise
 
 
 def fmtime(p: Path) -> str:
@@ -257,11 +275,20 @@ def get_playbook(name):
 
 @app.route("/api/playbooks/<path:name>", methods=["PUT"])
 def save_playbook(name):
-    p = PLAYBOOKS / name
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(request.json.get("content", ""))
-    log.info("Saved playbook: %s", name)
-    return jsonify({"success": True})
+    try:
+        p = PLAYBOOKS / name
+        p.resolve().relative_to(PLAYBOOKS.resolve())
+        p.parent.mkdir(parents=True, exist_ok=True)
+        content = (request.json or {}).get("content", "")
+        p.write_text(content)
+        log.info("Saved playbook: %s", name)
+        return jsonify({"success": True})
+    except PermissionError as exc:
+        log.error("Permission denied saving playbook %s: %s", name, exc)
+        return jsonify({"error": f"Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/ansible"}), 500
+    except Exception as exc:
+        log.error("Error saving playbook %s: %s", name, exc)
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/playbooks/<path:name>", methods=["DELETE"])
@@ -329,9 +356,20 @@ def get_inventory(name):
 
 @app.route("/api/inventory/<name>", methods=["PUT"])
 def save_inventory(name):
-    (INVENTORY / name).write_text(request.json.get("content", ""))
-    log.info("Saved inventory: %s", name)
-    return jsonify({"success": True})
+    try:
+        p = INVENTORY / name
+        # Prevent path traversal
+        p.resolve().relative_to(INVENTORY.resolve())
+        content = (request.json or {}).get("content", "")
+        p.write_text(content)
+        log.info("Saved inventory: %s", name)
+        return jsonify({"success": True})
+    except PermissionError as exc:
+        log.error("Permission denied saving inventory %s: %s", name, exc)
+        return jsonify({"error": f"Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/ansible"}), 500
+    except Exception as exc:
+        log.error("Error saving inventory %s: %s", name, exc)
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/inventory/<name>", methods=["DELETE"])
@@ -351,50 +389,68 @@ def list_schedules():
 
 @app.route("/api/schedules", methods=["POST"])
 def create_schedule():
-    d  = request.json or {}
-    s  = {
-        "id":        str(uuid.uuid4())[:8],
-        "name":      d.get("name", ""),
-        "playbook":  d.get("playbook", ""),
-        "inventory": d.get("inventory", "hosts.ini"),
-        "cron":      d.get("cron", "0 2 * * *"),
-        "enabled":   True,
-        "created":   datetime.datetime.now().isoformat(),
-        "last_run":  None,
-    }
-    sl = load_schedules()
-    sl.append(s)
-    save_schedules(sl)
-    register_schedule(s)
-    return jsonify(s)
+    try:
+        d  = request.json or {}
+        s  = {
+            "id":        str(uuid.uuid4())[:8],
+            "name":      d.get("name", ""),
+            "playbook":  d.get("playbook", ""),
+            "inventory": d.get("inventory", "hosts.ini"),
+            "cron":      d.get("cron", "0 2 * * *"),
+            "enabled":   True,
+            "created":   datetime.datetime.now().isoformat(),
+            "last_run":  None,
+        }
+        sl = load_schedules()
+        sl.append(s)
+        save_schedules(sl)
+        register_schedule(s)
+        return jsonify(s)
+    except PermissionError:
+        return jsonify({"error": "Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/backend"}), 500
+    except Exception as exc:
+        log.exception("Error creating schedule")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/schedules/<sid>", methods=["DELETE"])
 def del_schedule(sid):
-    sl = [s for s in load_schedules() if s["id"] != sid]
-    save_schedules(sl)
     try:
-        scheduler.remove_job(sid)
-    except Exception:
-        pass
-    return jsonify({"success": True})
+        sl = [s for s in load_schedules() if s["id"] != sid]
+        save_schedules(sl)
+        try:
+            scheduler.remove_job(sid)
+        except Exception:
+            pass
+        return jsonify({"success": True})
+    except PermissionError:
+        return jsonify({"error": "Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/backend"}), 500
+    except Exception as exc:
+        log.exception("Error deleting schedule %s", sid)
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/schedules/<sid>/toggle", methods=["POST"])
 def toggle_schedule(sid):
-    sl = load_schedules()
-    for s in sl:
-        if s["id"] == sid:
-            s["enabled"] = not s["enabled"]
-            if s["enabled"]:
-                register_schedule(s)
-            else:
-                try:
-                    scheduler.remove_job(sid)
-                except Exception:
-                    pass
-    save_schedules(sl)
-    return jsonify({"success": True})
+    try:
+        sl = load_schedules()
+        for s in sl:
+            if s["id"] == sid:
+                s["enabled"] = not s["enabled"]
+                if s["enabled"]:
+                    register_schedule(s)
+                else:
+                    try:
+                        scheduler.remove_job(sid)
+                    except Exception:
+                        pass
+        save_schedules(sl)
+        return jsonify({"success": True})
+    except PermissionError:
+        return jsonify({"error": "Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/backend"}), 500
+    except Exception as exc:
+        log.exception("Error toggling schedule %s", sid)
+        return jsonify({"error": str(exc)}), 500
 
 
 # ─── Reports ─────────────────────────────────────────────────────────────────
@@ -464,6 +520,238 @@ for _s in load_schedules():
 log.info("mac-ops ready — %d schedule(s) loaded",
          sum(1 for s in load_schedules() if s.get("enabled")))
 
+
+# ─── Ad-hoc Runner ────────────────────────────────────────────────────────────
+@app.route("/adhoc")
+def adhoc_page():
+    return send_from_directory(str(FRONTEND), "adhoc.html")
+
+
+@app.route("/api/adhoc", methods=["POST"])
+def api_adhoc():
+    d       = request.json or {}
+    pattern = d.get("pattern", "all").strip() or "all"
+    module  = d.get("module",  "ping").strip() or "ping"
+    args    = d.get("args",    "").strip()
+    inv     = d.get("inventory", "")
+
+    # Pick inventory file
+    if inv:
+        inv_path = INVENTORY / inv
+    else:
+        candidates = sorted(INVENTORY.glob("*.ini")) + sorted(INVENTORY.glob("*.yml"))
+        inv_path = candidates[0] if candidates else INVENTORY / "hosts.ini"
+
+    cmd = ["ansible", pattern, "-i", str(inv_path), "-m", module]
+    if args:
+        cmd += ["-a", args]
+    cmd += ["-v"]
+
+    log.info("Ad-hoc: %s", " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return jsonify({
+            "success":    result.returncode == 0,
+            "returncode": result.returncode,
+            "stdout":     result.stdout,
+            "stderr":     result.stderr,
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"success": False, "error": "Timed out after 60 seconds"})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)})
+
+
+# ─── Host Checker ─────────────────────────────────────────────────────────────
+@app.route("/hostcheck")
+def hostcheck_page():
+    return send_from_directory(str(FRONTEND), "hostcheck.html")
+
+
+@app.route("/api/hostcheck", methods=["POST"])
+def api_hostcheck():
+    import socket as _sock
+    import re as _re
+    hosts = [h.strip() for h in (request.json or {}).get("hosts", []) if h.strip()]
+    if not hosts:
+        return jsonify([])
+
+    # Build a set of hosts mentioned in any inventory file
+    inv_text = ""
+    for f in list(INVENTORY.glob("*.ini")) + list(INVENTORY.glob("*.yml")):
+        try:
+            inv_text += f.read_text(errors="replace")
+        except Exception:
+            pass
+
+    results = []
+    for host in hosts:
+        rec = {"host": host, "ping": False, "ssh": False,
+               "inventory": False, "latency": None}
+
+        # ICMP ping
+        try:
+            pr = subprocess.run(["ping", "-c", "1", "-W", "2", host],
+                                capture_output=True, text=True, timeout=5)
+            rec["ping"] = pr.returncode == 0
+            if rec["ping"]:
+                m = _re.search(r'time[=<](\d+\.?\d*)\s*ms', pr.stdout)
+                if m:
+                    rec["latency"] = float(m.group(1))
+        except Exception:
+            pass
+
+        # TCP port 22
+        try:
+            s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+            s.settimeout(3)
+            rec["ssh"] = s.connect_ex((host, 22)) == 0
+            s.close()
+        except Exception:
+            pass
+
+        # In inventory?
+        rec["inventory"] = host in inv_text
+
+        results.append(rec)
+
+    return jsonify(results)
+
+
+# ─── SSH Console ──────────────────────────────────────────────────────────────
+@app.route("/ssh-console")
+def ssh_console_page():
+    """Serve the web-based SSH terminal page."""
+    return send_from_directory(str(FRONTEND), "ssh_console.html")
+
+
+@socketio.on("connect", namespace="/ssh")
+def ssh_ws_connect():
+    log.info("SSH WebSocket connected: %s", request.sid)
+
+
+@socketio.on("disconnect", namespace="/ssh")
+def ssh_ws_disconnect():
+    sid = request.sid
+    with _ssh_lock:
+        sess = _ssh_sessions.pop(sid, None)
+    if sess:
+        try:
+            sess["channel"].close()
+            sess["client"].close()
+        except Exception:
+            pass
+    log.info("SSH WebSocket disconnected: %s", sid)
+
+
+@socketio.on("connect_ssh", namespace="/ssh")
+def ssh_ws_open(data):
+    """Establish SSH connection and start background reader thread."""
+    sid      = request.sid
+    host     = data.get("host", "").strip()
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    port     = int(data.get("port", 22))
+
+    if not host or not username:
+        emit("error", {"message": "Host and username are required"})
+        return
+
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(host, port=port, username=username,
+                       password=password, timeout=10,
+                       look_for_keys=False, allow_agent=False)
+        channel = client.invoke_shell(term="xterm-256color", width=220, height=50)
+        channel.setblocking(False)
+
+        with _ssh_lock:
+            _ssh_sessions[sid] = {"client": client, "channel": channel}
+
+        emit("connected", {"message": f"Connected to {host}"})
+        log.info("SSH session opened: %s -> %s@%s:%d", sid, username, host, port)
+
+        def _read_loop():
+            while True:
+                with _ssh_lock:
+                    if sid not in _ssh_sessions:
+                        break
+                    ch = _ssh_sessions[sid]["channel"]
+                try:
+                    ready, _, _ = select.select([ch], [], [], 0.1)
+                    if ready:
+                        chunk = ch.recv(4096)
+                        if not chunk:
+                            socketio.emit("disconnected",
+                                          {"message": "Connection closed by remote host"},
+                                          namespace="/ssh", to=sid)
+                            break
+                        socketio.emit("output",
+                                      {"data": chunk.decode("utf-8", errors="replace")},
+                                      namespace="/ssh", to=sid)
+                    elif ch.closed:
+                        socketio.emit("disconnected",
+                                      {"message": "Channel closed"},
+                                      namespace="/ssh", to=sid)
+                        break
+                except Exception as exc:
+                    with _ssh_lock:
+                        if sid in _ssh_sessions:
+                            socketio.emit("error", {"message": str(exc)},
+                                          namespace="/ssh", to=sid)
+                    break
+
+            with _ssh_lock:
+                sess = _ssh_sessions.pop(sid, None)
+            if sess:
+                try:
+                    sess["channel"].close()
+                    sess["client"].close()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_read_loop, daemon=True).start()
+
+    except paramiko.AuthenticationException:
+        emit("error", {"message": "Authentication failed — check username and password"})
+    except paramiko.SSHException as exc:
+        emit("error", {"message": f"SSH error: {exc}"})
+    except OSError as exc:
+        emit("error", {"message": f"Connection failed: {exc}"})
+    except Exception as exc:
+        log.exception("SSH connect error")
+        emit("error", {"message": f"Unexpected error: {exc}"})
+
+
+@socketio.on("input", namespace="/ssh")
+def ssh_ws_input(data):
+    sid = request.sid
+    with _ssh_lock:
+        sess = _ssh_sessions.get(sid)
+    if sess:
+        try:
+            sess["channel"].sendall(data.get("data", "").encode())
+        except Exception as exc:
+            emit("error", {"message": str(exc)})
+
+
+@socketio.on("resize", namespace="/ssh")
+def ssh_ws_resize(data):
+    sid = request.sid
+    with _ssh_lock:
+        sess = _ssh_sessions.get(sid)
+    if sess:
+        try:
+            sess["channel"].resize_pty(
+                width=int(data.get("cols", 80)),
+                height=int(data.get("rows", 24)),
+            )
+        except Exception:
+            pass
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False,
+                 allow_unsafe_werkzeug=True)

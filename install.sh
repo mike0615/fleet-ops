@@ -4,7 +4,7 @@
 # Installation Script for Rocky Linux 9.x
 # =============================================================================
 # Author  : Mike Anderson
-# Version : 1.1.0
+# Version : 1.2.0
 # License : MIT
 #
 # Usage (connected install):
@@ -14,15 +14,29 @@
 #   sudo bash install.sh --airgap
 #
 # What this script does:
-#   1. Installs base OS packages from BaseOS/AppStream (no EPEL)
-#   2. Creates /opt/mac-ops directory structure
-#   3. Copies application files from the package
-#   4. Builds Python venv and installs Flask + ansible-core via pip
-#      (airgap mode: installs from bundled ./pip-packages/ directory)
-#   5. Generates SSH key pair for Ansible
-#   6. Writes /etc/ansible/ansible.cfg
-#   7. Registers and starts mac-ops.service (systemd)
-#   8. Opens firewall port 5000
+#   1.  Installs base OS packages from BaseOS/AppStream (no EPEL)
+#   2.  Creates /opt/mac-ops directory structure
+#   3.  Copies application files from the package
+#   4.  Builds Python venv and installs Flask + ansible-core via pip
+#       (airgap mode: installs from bundled ./pip-packages/ directory)
+#   5.  Generates SSH key pair for Ansible
+#   6.  Writes /etc/ansible/ansible.cfg
+#   7.  Registers and starts mac-ops.service (systemd)
+#   8.  Opens firewall port 5000
+#   9.  Applies SELinux port label (http_port_t) for port 5000
+#   9b. Fixes ownership on all writable directories (ansible, backend, logs)
+#   10. Configures sudoers for the macops service account
+#   11. Configures logrotate
+#   12. Smoke-tests the API
+#
+# Features in this release (v1.2.0):
+#   - Playbook editor with upload, + New, run, validate
+#   - Inventory editor with save/create/delete
+#   - Schedule manager (APScheduler cron)
+#   - Web-based SSH Console (xterm.js + Socket.IO + paramiko)
+#   - Ad-hoc Runner (ansible module execution from the browser)
+#   - Host Checker (ICMP ping, TCP :22, inventory membership)
+#   - Reports viewer, execution log viewer, dashboard
 # =============================================================================
 
 set -euo pipefail
@@ -54,7 +68,7 @@ PIP_PKG_DIR="${SRC}/pip-packages"
 
 echo -e "${BLD}${CYN}"
 echo "  ╔═══════════════════════════════════════════╗"
-echo "  ║   mac-ops — Maytag Ansible Console v1.1  ║"
+echo "  ║   mac-ops — Maytag Ansible Console v1.2  ║"
 echo "  ║   Author: Mike Anderson                   ║"
 echo "  ║   Rocky Linux 9  ·  $([ "$AIRGAP" = true ] && echo "AIRGAP MODE" || echo "ONLINE MODE ")        ║"
 echo "  ╚═══════════════════════════════════════════╝"
@@ -128,15 +142,17 @@ if $AIRGAP; then
     "${VENV_PIP}" install \
         --no-index \
         --find-links="${PIP_PKG_DIR}" \
-        flask flask-cors "apscheduler>=3.10,<4" pyyaml ansible-core \
+        flask flask-cors flask-socketio "apscheduler>=3.10,<4" pyyaml paramiko ansible-core \
         --quiet
 else
     log "Installing from PyPI (online mode)..."
     "${VENV_PIP}" install \
         "flask>=3.0,<4" \
         "flask-cors>=4.0" \
+        "flask-socketio>=5.3,<6" \
         "apscheduler>=3.10,<4" \
         "pyyaml>=6.0" \
+        "paramiko>=3.0" \
         "ansible-core>=2.15" \
         --quiet
 fi
@@ -179,7 +195,7 @@ mkdir -p /etc/ansible
 cat > /etc/ansible/ansible.cfg << EOF
 # mac-ops Ansible Configuration
 # Author  : Mike Anderson
-# Version : 1.1.0
+# Version : 1.2.0
 
 [defaults]
 inventory           = ${INSTALL_DIR}/ansible/inventory/hosts.ini
@@ -201,7 +217,7 @@ log "Ansible config written to /etc/ansible/ansible.cfg"
 sec "Step 8: Installing systemd Service (${SVC_NAME}.service)"
 cat > /etc/systemd/system/${SVC_NAME}.service << EOF
 [Unit]
-Description=mac-ops Maytag Ansible Console v1.1.0
+Description=mac-ops Maytag Ansible Console v1.2.0
 After=network.target
 # Author: Mike Anderson
 
@@ -241,6 +257,48 @@ if systemctl is-active --quiet firewalld; then
 else
     warn "firewalld not running — open port manually if needed"
 fi
+
+# ── Step 9b: SELinux — label port for HTTP use ────────────────────────────────
+sec "Step 9b: Configuring SELinux for Port ${PORT}/tcp"
+if command -v getenforce &>/dev/null && [[ "$(getenforce 2>/dev/null)" != "Disabled" ]]; then
+    # policycoreutils-python-utils provides semanage on Rocky 9
+    if ! rpm -q policycoreutils-python-utils &>/dev/null; then
+        log "Installing policycoreutils-python-utils for semanage..."
+        dnf install -y policycoreutils-python-utils -q
+    fi
+    # Label port 5000 as http_port_t so the Flask service can bind to it.
+    # 'add' first; if the port is already listed, fall back to 'modify'.
+    if semanage port -a -t http_port_t -p tcp "${PORT}" 2>/dev/null; then
+        log "SELinux: port ${PORT}/tcp added as http_port_t"
+    elif semanage port -m -t http_port_t -p tcp "${PORT}" 2>/dev/null; then
+        log "SELinux: port ${PORT}/tcp updated to http_port_t"
+    else
+        warn "SELinux port labeling skipped (port may already be correctly labeled)"
+    fi
+    # Restore default file contexts under the install directory
+    restorecon -Rv "${INSTALL_DIR}" &>/dev/null || true
+    log "SELinux file contexts restored for ${INSTALL_DIR}"
+    # Restart the service now that the port label is correct
+    systemctl restart "${SVC_NAME}" 2>/dev/null || true
+else
+    warn "SELinux is disabled or not present — skipping port labeling"
+fi
+
+# ── Step 9c: Ownership fix — ensure macops can write all data directories ─────
+# This prevents "cannot save" / "Permission denied" errors on inventory files,
+# playbooks, schedules.json, and log files when restorecon or package updates
+# reset file ownership.
+sec "Step 9c: Fixing Ownership on Writable Directories"
+chown -R "${SVC_USER}:${SVC_USER}" \
+    "${INSTALL_DIR}/ansible" \
+    "${INSTALL_DIR}/backend" \
+    "${INSTALL_DIR}/reports" \
+    "${INSTALL_DIR}/logs"
+chmod -R 755 \
+    "${INSTALL_DIR}/ansible" \
+    "${INSTALL_DIR}/backend"
+chmod 750 "${INSTALL_DIR}/reports" "${INSTALL_DIR}/logs"
+log "Ownership verified for ansible/, backend/, reports/, logs/"
 
 # ── Step 10: Sudoers ──────────────────────────────────────────────────────────
 sec "Step 10: Configuring Sudoers"
@@ -282,12 +340,14 @@ IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo ""
 echo -e "${GRN}${BLD}"
 echo "  ╔═══════════════════════════════════════════╗"
-echo "  ║    mac-ops Installation Complete ✅       ║"
+echo "  ║   mac-ops v1.2.0 Installation Complete ✅ ║"
 echo "  ╚═══════════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "${BLD}Open in browser:${NC}"
-echo -e "  ${CYN}http://${IP}:${PORT}${NC}"
-echo -e "  ${CYN}http://localhost:${PORT}${NC}"
+echo -e "  ${CYN}http://${IP}:${PORT}${NC}           ← Main console"
+echo -e "  ${CYN}http://${IP}:${PORT}/ssh-console${NC}  ← Web SSH terminal"
+echo -e "  ${CYN}http://${IP}:${PORT}/adhoc${NC}        ← Ad-hoc runner"
+echo -e "  ${CYN}http://${IP}:${PORT}/hostcheck${NC}    ← Host checker"
 echo ""
 echo -e "${BLD}Key paths:${NC}"
 echo -e "  App root:   ${INSTALL_DIR}"
@@ -295,6 +355,7 @@ echo -e "  Playbooks:  ${INSTALL_DIR}/ansible/playbooks/"
 echo -e "  Inventory:  ${INSTALL_DIR}/ansible/inventory/"
 echo -e "  Reports:    ${INSTALL_DIR}/reports/"
 echo -e "  Logs:       ${INSTALL_DIR}/logs/"
+echo -e "  Schedules:  ${INSTALL_DIR}/backend/schedules.json"
 echo -e "  SSH key:    /home/${SVC_USER}/.ssh/ansible_key.pub"
 echo ""
 echo -e "${BLD}Service commands:${NC}"
@@ -304,3 +365,6 @@ echo -e "  journalctl -u ${SVC_NAME} -f"
 echo ""
 echo -e "${YLW}▶ NEXT: Add the SSH public key shown above to ~/.ssh/authorized_keys"
 echo -e "  on each host you want mac-ops to manage.${NC}"
+echo ""
+echo -e "${YLW}▶ SSH Console: launch from the sidebar or open /ssh-console directly."
+echo -e "  Connects to any host using username + password or key auth.${NC}"

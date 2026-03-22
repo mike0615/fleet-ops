@@ -37,3 +37,7 @@ logs/
 *.old
 *.bak
 *.orig
+
+# lrn-pxe — extracted to its own repo; ignore any temp copies here
+lrn-pxe/
+lrn-pxe-project/

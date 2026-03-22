@@ -1,4 +1,6 @@
 flask>=3.0,<4
 flask-cors>=4.0
+flask-socketio>=5.3,<6
 apscheduler>=3.10,<4
 pyyaml>=6.0
+paramiko>=3.0
