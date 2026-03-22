@@ -1,0 +1,186 @@
+---
+###############################################################
+# Playbook : add_local_user.yml
+# Purpose  : Create a local user account on all target hosts
+#            - Creates user with specified UID / shell / groups
+#            - Sets an initial password (vault-encrypted)
+#            - Optionally grants passwordless sudo access
+#            - Optionally deploys an SSH authorized key
+#            - Forces password change on first login
+#
+# Usage:
+#   ansible-playbook playbooks/add_local_user.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "new_user=jsmith new_user_fullname='Jane Smith'" \
+#     --ask-vault-pass
+#
+# Required extra vars (or set defaults below):
+#   new_user          — login name to create
+#
+# Optional extra vars:
+#   new_user_fullname — GECOS / display name  (default: same as new_user)
+#   new_user_shell    — login shell            (default: /bin/bash)
+#   new_user_groups   — comma-separated supplementary groups (default: "")
+#   new_user_sudo     — true|false give NOPASSWD sudo          (default: false)
+#   new_user_ssh_key  — public key string to authorize          (default: "")
+#   new_user_uid      — desired UID, leave empty for auto       (default: "")
+#
+# Password:
+#   Set vault_new_user_password in group_vars/all/vault.yml (ansible-vault).
+#   It must be a pre-hashed shadow entry.  Generate with:
+#     python3 -c "from passlib.hash import sha512_crypt; \
+#                 print(sha512_crypt.using(rounds=5000).hash('MyP@ssw0rd'))"
+###############################################################
+
+- name: "Add Local User — {{ new_user | default('UNDEFINED') }}"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: yes
+  become: yes
+
+  vars:
+    new_user_fullname: "{{ new_user_fullname | default(new_user) }}"
+    new_user_shell:    "{{ new_user_shell    | default('/bin/bash') }}"
+    new_user_groups:   "{{ new_user_groups   | default('') }}"
+    new_user_sudo:     "{{ new_user_sudo     | default(false) | bool }}"
+    new_user_ssh_key:  "{{ new_user_ssh_key  | default('') }}"
+    new_user_uid:      "{{ new_user_uid      | default('') }}"
+    # Store hashed password in group_vars/all/vault.yml encrypted with ansible-vault
+    # vault_new_user_password: "$6$rounds=5000$..."
+    new_user_password: "{{ vault_new_user_password | default(omit) }}"
+
+  pre_tasks:
+
+    - name: Validate that new_user is defined
+      assert:
+        that:
+          - new_user is defined
+          - new_user | length > 0
+          - new_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: >
+          'new_user' must be defined and be a valid Linux username
+          (lowercase letters, digits, underscore, hyphen; start with letter or _).
+
+    - name: Validate that vault_new_user_password is defined
+      assert:
+        that:
+          - vault_new_user_password is defined
+          - vault_new_user_password | length > 0
+        fail_msg: >
+          'vault_new_user_password' must be defined in vault.yml as a SHA-512
+          hashed password string.  Generate with:
+            python3 -c "from passlib.hash import sha512_crypt; print(sha512_crypt.using(rounds=5000).hash('YourPassword'))"
+
+    - name: Check if user already exists
+      getent:
+        database: passwd
+        key: "{{ new_user }}"
+      register: r_user_check
+      ignore_errors: yes
+
+    - name: Report existing user
+      debug:
+        msg: "User '{{ new_user }}' already exists on {{ inventory_hostname }} — account will be updated in-place."
+      when: r_user_check is not failed
+
+  tasks:
+
+    # ── Create user account ──────────────────────────────────────────────────
+
+    - name: Create user group (explicit GID = UID when UID is set)
+      group:
+        name:  "{{ new_user }}"
+        gid:   "{{ new_user_uid | int if new_user_uid | length > 0 else omit }}"
+        state: present
+
+    - name: Create local user account
+      user:
+        name:            "{{ new_user }}"
+        comment:         "{{ new_user_fullname }}"
+        shell:           "{{ new_user_shell }}"
+        groups:          "{{ new_user_groups.split(',') | map('trim') | list if new_user_groups | length > 0 else [] }}"
+        append:          yes
+        password:        "{{ new_user_password }}"
+        update_password: on_create
+        uid:             "{{ new_user_uid | int if new_user_uid | length > 0 else omit }}"
+        create_home:     yes
+        state:           present
+      no_log: true
+      register: r_user_create
+
+    - name: Set correct home directory permissions
+      file:
+        path:  "/home/{{ new_user }}"
+        owner: "{{ new_user }}"
+        group: "{{ new_user }}"
+        mode:  "0750"
+        state: directory
+
+    # ── Force password change on first login ─────────────────────────────────
+
+    - name: Expire password to force change at first login
+      command: chage -d 0 "{{ new_user }}"
+      changed_when: true
+      when: r_user_create.changed
+
+    # ── SSH authorized key ────────────────────────────────────────────────────
+
+    - name: Deploy SSH authorized key
+      authorized_key:
+        user:    "{{ new_user }}"
+        key:     "{{ new_user_ssh_key }}"
+        state:   present
+        exclusive: no
+      when: new_user_ssh_key | length > 0
+
+    # ── Sudo access ───────────────────────────────────────────────────────────
+
+    - name: Grant passwordless sudo
+      copy:
+        dest:    "/etc/sudoers.d/{{ new_user }}"
+        content: "{{ new_user }} ALL=(ALL) NOPASSWD: ALL\n"
+        owner:   root
+        group:   root
+        mode:    "0440"
+        validate: "visudo -cf %s"
+      when: new_user_sudo | bool
+
+    - name: Remove sudo grant (if new_user_sudo is false)
+      file:
+        path:  "/etc/sudoers.d/{{ new_user }}"
+        state: absent
+      when: not (new_user_sudo | bool)
+
+    # ── SELinux home context ──────────────────────────────────────────────────
+
+    - name: Restore SELinux context on home directory
+      command: restorecon -Rv "/home/{{ new_user }}"
+      changed_when: false
+      when: ansible_selinux.status == "enabled"
+
+    # ── Verification ──────────────────────────────────────────────────────────
+
+    - name: Verify user exists in passwd
+      getent:
+        database: passwd
+        key: "{{ new_user }}"
+      register: r_verify
+
+    - name: Verify user UID and shell
+      assert:
+        that:
+          - r_verify is not failed
+        fail_msg: "User '{{ new_user }}' was not found in /etc/passwd after creation!"
+        success_msg: "User '{{ new_user }}' verified successfully."
+
+    - name: Summary
+      debug:
+        msg:
+          - "Host        : {{ inventory_hostname }}"
+          - "User        : {{ new_user }}"
+          - "Full name   : {{ new_user_fullname }}"
+          - "Shell       : {{ new_user_shell }}"
+          - "Groups      : {{ new_user_groups if new_user_groups | length > 0 else '(primary group only)' }}"
+          - "Sudo        : {{ 'NOPASSWD ALL' if new_user_sudo | bool else 'none' }}"
+          - "SSH key     : {{ 'deployed' if new_user_ssh_key | length > 0 else 'none' }}"
+          - "Pw expire   : first-login change required"
+          - "Result      : {{ 'created' if r_user_create.changed else 'already existed — updated' }}"

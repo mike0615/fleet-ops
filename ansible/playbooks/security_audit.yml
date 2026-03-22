@@ -157,12 +157,13 @@
 
     # ── User Account Security ────────────────────────────────────
     - name: UID-0 users
-      shell: awk -F: '($3==0){print $1}' /etc/passwd
+      shell: "awk -F: '($3==0){print $1}' /etc/passwd"
       register: r_uid0
       changed_when: false
 
     - name: Empty or locked passwords
-      shell: awk -F: '($2==""||$2=="!"){print $1}' /etc/shadow 2>/dev/null || echo "(cannot read shadow)"
+      shell: |
+        awk -F: '($2==""||$2=="!"){print $1}' /etc/shadow 2>/dev/null || echo "(cannot read shadow)"
       register: r_emptypw
       changed_when: false
 
@@ -195,7 +196,7 @@
 
     - name: User crontabs
       shell: |
-        for u in $(getent passwd | awk -F: '$3>=500{print $1}'); do
+        for u in $(getent passwd | awk -F: '$3>=1000{print $1}'); do
           ct=$(crontab -l -u "$u" 2>/dev/null)
           [ -n "$ct" ] && echo "=== $u ===" && echo "$ct"
         done
@@ -244,7 +245,7 @@
     # ── Filesystem Security ──────────────────────────────────────
     - name: Recently modified critical files (24h)
       shell: >
-        find /etc /usr/bin /usr/sbin /bin /sbin -newer /tmp -type f 2>/dev/null
+        find /etc /usr/bin /usr/sbin /bin /sbin -mtime -1 -type f 2>/dev/null
         | head -50 || echo "(none)"
       register: r_modfiles
       changed_when: false

@@ -1,0 +1,150 @@
+---
+###############################################################
+# Playbook : deploy_ssh_key.yml
+# Purpose  : Add or remove an SSH public key from a user's
+#            authorized_keys on all (or targeted) hosts
+#            - Verifies target user exists before acting
+#            - Idempotent: safe to run multiple times
+#            - Supports add (present) or remove (absent)
+#            - Fixes ~/.ssh directory permissions after changes
+#
+# Usage (add key):
+#   ansible-playbook playbooks/deploy_ssh_key.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "ssh_user=jsmith ssh_pubkey='ssh-ed25519 AAAA... user@host'"
+#
+# Usage (remove key):
+#   ansible-playbook playbooks/deploy_ssh_key.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "ssh_user=jsmith ssh_pubkey='ssh-ed25519 AAAA... user@host' \
+#         ssh_key_state=absent"
+#
+# Usage (read key from a local file):
+#   ansible-playbook playbooks/deploy_ssh_key.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "ssh_user=jsmith" \
+#     -e "ssh_pubkey={{ lookup('file', '~/.ssh/id_ed25519.pub') }}"
+#
+# Required extra vars:
+#   ssh_user          — target local user account
+#   ssh_pubkey        — full public key string (or file lookup)
+#
+# Optional extra vars:
+#   ssh_key_state     — present | absent              (default: present)
+#   ssh_key_exclusive — true: replace ALL keys; false: append (default: false)
+#   target_hosts      — override host pattern         (default: all)
+###############################################################
+
+- name: "Deploy SSH Key — {{ ssh_user | default('UNDEFINED') }}"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: yes
+  become: yes
+
+  vars:
+    ssh_key_state:     "{{ ssh_key_state     | default('present') }}"
+    ssh_key_exclusive: "{{ ssh_key_exclusive | default(false) | bool }}"
+
+  pre_tasks:
+
+    - name: Validate required variables
+      assert:
+        that:
+          - ssh_user   is defined and ssh_user   | length > 0
+          - ssh_pubkey is defined and ssh_pubkey | length > 0
+        fail_msg: >
+          Both 'ssh_user' and 'ssh_pubkey' must be provided.
+          Example: -e "ssh_user=jsmith ssh_pubkey='ssh-ed25519 AAAA...'"
+
+    - name: Validate ssh_key_state value
+      assert:
+        that: ssh_key_state in ['present', 'absent']
+        fail_msg: "ssh_key_state must be 'present' or 'absent', got: {{ ssh_key_state }}"
+
+    - name: Check that target user exists
+      getent:
+        database: passwd
+        key: "{{ ssh_user }}"
+      register: r_getent
+      ignore_errors: yes
+
+    - name: Warn if user does not exist
+      debug:
+        msg: >
+          WARNING: user '{{ ssh_user }}' does not exist on
+          {{ inventory_hostname }} — skipping.
+      when: r_getent is failed
+
+  tasks:
+
+    # ── Ensure .ssh directory exists with correct permissions ────────────────
+
+    - name: Ensure ~/.ssh directory exists
+      file:
+        path:  "{{ r_getent.ansible_facts.getent_passwd[ssh_user][4] }}/.ssh"
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
+        mode:  "0700"
+        state: directory
+      when: r_getent is not failed
+
+    # ── Deploy or remove the public key ──────────────────────────────────────
+
+    - name: "{{ 'Add' if ssh_key_state == 'present' else 'Remove' }} SSH authorized key"
+      authorized_key:
+        user:      "{{ ssh_user }}"
+        key:       "{{ ssh_pubkey }}"
+        state:     "{{ ssh_key_state }}"
+        exclusive: "{{ ssh_key_exclusive | bool }}"
+      register: r_key
+      when: r_getent is not failed
+
+    # ── Fix authorized_keys permissions ──────────────────────────────────────
+
+    - name: Ensure authorized_keys has correct permissions
+      file:
+        path:  "{{ r_getent.ansible_facts.getent_passwd[ssh_user][4] }}/.ssh/authorized_keys"
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
+        mode:  "0600"
+        state: file
+      when:
+        - r_getent is not failed
+        - ssh_key_state == 'present'
+      ignore_errors: yes   # file may not yet exist if key was never deployed
+
+    # ── Restore SELinux context ───────────────────────────────────────────────
+
+    - name: Restore SELinux context on .ssh directory
+      command: >
+        restorecon -Rv
+        "{{ r_getent.ansible_facts.getent_passwd[ssh_user][4] }}/.ssh"
+      changed_when: false
+      when:
+        - r_getent is not failed
+        - ansible_selinux.status == "enabled"
+
+    # ── Verification ──────────────────────────────────────────────────────────
+
+    - name: Show current authorized_keys content
+      shell: >
+        cat "{{ r_getent.ansible_facts.getent_passwd[ssh_user][4] }}/.ssh/authorized_keys"
+        2>/dev/null || echo "(file does not exist)"
+      register: r_authkeys_content
+      changed_when: false
+      when: r_getent is not failed
+
+    - name: Summary
+      debug:
+        msg:
+          - "Host         : {{ inventory_hostname }}"
+          - "User         : {{ ssh_user }}"
+          - "Action       : {{ ssh_key_state }}"
+          - "Changed      : {{ r_key.changed | default('N/A') }}"
+          - "Exclusive    : {{ ssh_key_exclusive | bool }}"
+          - "Keys on file : {{ r_authkeys_content.stdout_lines | length | default(0) }} line(s)"
+      when: r_getent is not failed
+
+    - name: Summary (user not found)
+      debug:
+        msg: "SKIPPED — user '{{ ssh_user }}' not found on {{ inventory_hostname }}"
+      when: r_getent is failed

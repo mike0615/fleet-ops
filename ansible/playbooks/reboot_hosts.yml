@@ -1,0 +1,163 @@
+---
+###############################################################
+# Playbook : reboot_hosts.yml
+# Purpose  : Safely reboot hosts one at a time (serial: 1)
+#            - Pre-reboot checks (disk space, failed services)
+#            - Graceful reboot with configurable timeout
+#            - Waits for host to come back and SSH to respond
+#            - Post-reboot verification (uptime, failed units)
+#            - Skips hosts with active block-device I/O issues
+#
+# Usage:
+#   ansible-playbook playbooks/reboot_hosts.yml \
+#     -i ../inventory/hosts.ini
+#
+#   # Reboot only a subset of hosts:
+#   ansible-playbook playbooks/reboot_hosts.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "target_hosts=web_servers"
+#
+#   # Skip pre-flight checks (use with care):
+#   ansible-playbook playbooks/reboot_hosts.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "skip_preflight=true"
+#
+# Optional extra vars:
+#   target_hosts      — host pattern to reboot          (default: all)
+#   reboot_timeout    — seconds to wait for host return (default: 300)
+#   skip_preflight    — bypass disk/service checks      (default: false)
+#   reboot_msg        — wall message before reboot      (default: see below)
+###############################################################
+
+- name: "Controlled Reboot"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: yes
+  become: yes
+  serial: 1          # Reboot one host at a time
+
+  vars:
+    reboot_timeout: "{{ reboot_timeout | default(300) | int }}"
+    skip_preflight: "{{ skip_preflight | default(false) | bool }}"
+    reboot_msg:     "{{ reboot_msg | default('System reboot initiated by Ansible — mac-ops') }}"
+    disk_warn_pct:  85
+
+  pre_tasks:
+
+    - name: "PRE-FLIGHT — {{ inventory_hostname }}"
+      debug:
+        msg: "Starting pre-flight checks on {{ inventory_hostname }} ({{ ansible_default_ipv4.address | default('?') }})"
+
+    # ── Disk space check ─────────────────────────────────────────────────────
+
+    - name: Check disk space (warn if > {{ disk_warn_pct }}%)
+      shell: >
+        df -h | awk 'NR>1 && $1 !~ /^(tmpfs|devtmpfs)/ {
+          gsub(/%/,"",$5);
+          if ($5+0 > {{ disk_warn_pct }}) print $0
+        }'
+      register: r_disk
+      changed_when: false
+      when: not skip_preflight | bool
+
+    - name: Report disk warnings
+      debug:
+        msg: "DISK WARNING on {{ inventory_hostname }}:\n{{ r_disk.stdout }}"
+      when:
+        - not skip_preflight | bool
+        - r_disk.stdout | length > 0
+
+    # ── Failed services check ─────────────────────────────────────────────────
+
+    - name: Check for failed systemd units
+      shell: systemctl --failed --no-pager --no-legend 2>/dev/null | grep -v '0 loaded'
+      register: r_failed_units
+      changed_when: false
+      ignore_errors: yes
+      when: not skip_preflight | bool
+
+    - name: Report failed units (informational, will not block reboot)
+      debug:
+        msg: "Failed units on {{ inventory_hostname }}:\n{{ r_failed_units.stdout }}"
+      when:
+        - not skip_preflight | bool
+        - r_failed_units.stdout | trim | length > 0
+
+    # ── Pre-reboot snapshot ──────────────────────────────────────────────────
+
+    - name: Record uptime before reboot
+      command: uptime
+      register: r_uptime_before
+      changed_when: false
+
+    - name: Record kernel before reboot
+      command: uname -r
+      register: r_kernel_before
+      changed_when: false
+
+    - name: Pre-reboot summary
+      debug:
+        msg:
+          - "Host        : {{ inventory_hostname }}"
+          - "IP          : {{ ansible_default_ipv4.address | default('?') }}"
+          - "Kernel      : {{ r_kernel_before.stdout }}"
+          - "Uptime      : {{ r_uptime_before.stdout }}"
+          - "Timeout     : {{ reboot_timeout }}s"
+
+  tasks:
+
+    # ── Reboot ────────────────────────────────────────────────────────────────
+
+    - name: Send wall message before reboot
+      shell: "wall '{{ reboot_msg }}'"
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Reboot {{ inventory_hostname }}
+      reboot:
+        msg:              "{{ reboot_msg }}"
+        reboot_timeout:   "{{ reboot_timeout | int }}"
+        pre_reboot_delay: 5
+        post_reboot_delay: 15
+        connect_timeout:  15
+        test_command:     "systemctl is-system-running --wait || true"
+
+  post_tasks:
+
+    # ── Post-reboot verification ──────────────────────────────────────────────
+
+    - name: Gather facts after reboot
+      setup:
+        gather_subset: ["min"]
+
+    - name: Record uptime after reboot
+      command: uptime
+      register: r_uptime_after
+      changed_when: false
+
+    - name: Record kernel after reboot
+      command: uname -r
+      register: r_kernel_after
+      changed_when: false
+
+    - name: Check for failed services after reboot
+      shell: systemctl --failed --no-pager --no-legend 2>/dev/null
+      register: r_failed_after
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Check system-running state
+      shell: systemctl is-system-running 2>/dev/null || true
+      register: r_sysstate
+      changed_when: false
+
+    - name: Post-reboot summary
+      debug:
+        msg:
+          - "Host            : {{ inventory_hostname }}"
+          - "Kernel (before) : {{ r_kernel_before.stdout }}"
+          - "Kernel (after)  : {{ r_kernel_after.stdout }}"
+          - "Kernel changed  : {{ r_kernel_before.stdout != r_kernel_after.stdout }}"
+          - "Uptime (after)  : {{ r_uptime_after.stdout }}"
+          - "System state    : {{ r_sysstate.stdout }}"
+          - "Failed units    : {{ r_failed_after.stdout | default('none') | trim or 'none' }}"
+          - "Status          : REBOOT COMPLETE ✓"

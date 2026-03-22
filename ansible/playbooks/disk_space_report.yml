@@ -1,0 +1,180 @@
+---
+###############################################################
+# Playbook : disk_space_report.yml
+# Purpose  : Report disk usage across all hosts and flag
+#            filesystems that exceed a warning threshold
+#            - Shows df, inode usage, top directories by size
+#            - Identifies filesystems over warn/critical %
+#            - Fetches a JSON report back to the controller
+#            - Prints a console summary with per-host alerts
+#
+# Usage:
+#   ansible-playbook playbooks/disk_space_report.yml \
+#     -i ../inventory/hosts.ini
+#
+#   # Lower the warning threshold:
+#   ansible-playbook playbooks/disk_space_report.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "disk_warn_pct=70 disk_crit_pct=85"
+#
+# Optional extra vars:
+#   disk_warn_pct     — % utilisation to flag as WARNING  (default: 80)
+#   disk_crit_pct     — % utilisation to flag as CRITICAL (default: 90)
+#   top_dir_count     — top N directories to report       (default: 10)
+#   top_dir_path      — path to scan for large dirs       (default: /)
+#   target_hosts      — override host pattern             (default: all)
+###############################################################
+
+- name: "Disk Space Report"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: yes
+  become: yes
+
+  vars:
+    disk_warn_pct:  "{{ disk_warn_pct  | default(80)  | int }}"
+    disk_crit_pct:  "{{ disk_crit_pct  | default(90)  | int }}"
+    top_dir_count:  "{{ top_dir_count  | default(10)  | int }}"
+    top_dir_path:   "{{ top_dir_path   | default('/') }}"
+    report_dir:     "/opt/mac-ops/reports"
+    ts:             "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
+    report_file:    "{{ report_dir }}/disk_{{ inventory_hostname }}_{{ ts }}.json"
+
+  tasks:
+
+    - name: Ensure report directory exists
+      file:
+        path:  "{{ report_dir }}"
+        state: directory
+        mode:  "0755"
+
+    # ── Disk usage ───────────────────────────────────────────────────────────
+
+    - name: df — all real filesystems
+      shell: >
+        df -hT --output=source,fstype,size,used,avail,pcent,target
+        | grep -v '^Filesystem\|^tmpfs\|^devtmpfs\|^overlay\|^udev'
+      register: r_df
+      changed_when: false
+
+    - name: df — numeric (for threshold check)
+      shell: >
+        df -PT
+        | grep -v '^Filesystem\|tmpfs\|devtmpfs\|overlay\|udev'
+        | awk '{gsub(/%/,"",$6); print $7 "=" $6}'
+      register: r_df_pct
+      changed_when: false
+
+    - name: Inode usage
+      shell: >
+        df -hiT --output=source,fstype,itotal,iused,iavail,ipcent,target
+        | grep -v '^Filesystem\|^tmpfs\|^devtmpfs\|^overlay'
+      register: r_inodes
+      changed_when: false
+
+    # ── Flag over-threshold filesystems ──────────────────────────────────────
+
+    - name: Identify WARNING filesystems (>= {{ disk_warn_pct }}%)
+      shell: >
+        df -PT
+        | grep -v '^Filesystem\|tmpfs\|devtmpfs\|overlay\|udev'
+        | awk '{gsub(/%/,"",$6);
+                if ($6+0 >= {{ disk_warn_pct }}) print $7 " at " $6 "%"}'
+      register: r_warn_fs
+      changed_when: false
+
+    - name: Identify CRITICAL filesystems (>= {{ disk_crit_pct }}%)
+      shell: >
+        df -PT
+        | grep -v '^Filesystem\|tmpfs\|devtmpfs\|overlay\|udev'
+        | awk '{gsub(/%/,"",$6);
+                if ($6+0 >= {{ disk_crit_pct }}) print $7 " at " $6 "%"}'
+      register: r_crit_fs
+      changed_when: false
+
+    # ── Top directories by size ──────────────────────────────────────────────
+
+    - name: Top {{ top_dir_count }} directories by size under {{ top_dir_path }}
+      shell: >
+        du -xh --max-depth=3 {{ top_dir_path }} 2>/dev/null
+        | sort -rh
+        | head -{{ top_dir_count }}
+      register: r_top_dirs
+      changed_when: false
+
+    # ── LVM info (if available) ──────────────────────────────────────────────
+
+    - name: LVM physical volumes
+      shell: pvs 2>/dev/null || echo "(LVM not in use)"
+      register: r_pvs
+      changed_when: false
+
+    - name: LVM volume groups
+      shell: vgs 2>/dev/null || echo "(LVM not in use)"
+      register: r_vgs
+      changed_when: false
+
+    - name: LVM logical volumes
+      shell: lvs 2>/dev/null || echo "(LVM not in use)"
+      register: r_lvs
+      changed_when: false
+
+    # ── Build & write report ─────────────────────────────────────────────────
+
+    - name: Build disk report
+      set_fact:
+        disk_report:
+          report_type:   "disk_space"
+          host:          "{{ inventory_hostname }}"
+          generated:     "{{ ansible_date_time.iso8601 }}"
+          thresholds:
+            warning_pct:  "{{ disk_warn_pct }}"
+            critical_pct: "{{ disk_crit_pct }}"
+          alerts:
+            critical:  "{{ r_crit_fs.stdout_lines }}"
+            warning:   "{{ r_warn_fs.stdout_lines }}"
+          disk_usage:
+            df_human:    "{{ r_df.stdout_lines }}"
+            df_percent:  "{{ r_df_pct.stdout_lines }}"
+            inodes:      "{{ r_inodes.stdout_lines }}"
+          top_dirs:      "{{ r_top_dirs.stdout_lines }}"
+          lvm:
+            pvs: "{{ r_pvs.stdout }}"
+            vgs: "{{ r_vgs.stdout }}"
+            lvs: "{{ r_lvs.stdout }}"
+
+    - name: Write report on remote host
+      copy:
+        content: "{{ disk_report | to_nice_json }}"
+        dest:    "{{ report_file }}"
+        mode:    "0644"
+
+    - name: Fetch report to controller
+      fetch:
+        src:  "{{ report_file }}"
+        dest: "/opt/mac-ops/reports/disk_{{ inventory_hostname }}_{{ ts }}.json"
+        flat: yes
+
+    # ── Console output ────────────────────────────────────────────────────────
+
+    - name: CRITICAL alert
+      debug:
+        msg: "🔴 CRITICAL on {{ inventory_hostname }}: {{ r_crit_fs.stdout_lines }}"
+      when: r_crit_fs.stdout | trim | length > 0
+
+    - name: WARNING alert
+      debug:
+        msg: "🟡 WARNING on {{ inventory_hostname }}: {{ r_warn_fs.stdout_lines }}"
+      when:
+        - r_warn_fs.stdout | trim | length > 0
+        - r_crit_fs.stdout | trim | length == 0
+
+    - name: Disk OK
+      debug:
+        msg: "✅ {{ inventory_hostname }} — all filesystems below {{ disk_warn_pct }}%"
+      when:
+        - r_warn_fs.stdout | trim | length == 0
+        - r_crit_fs.stdout | trim | length == 0
+
+    - name: Disk usage summary
+      debug:
+        msg: "{{ r_df.stdout_lines }}"

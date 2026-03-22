@@ -1,0 +1,152 @@
+---
+###############################################################
+# Playbook : service_control.yml
+# Purpose  : Start, stop, restart, reload, or check the
+#            status of a systemd service across all hosts
+#            - Verifies the unit file exists before acting
+#            - Optionally enables/disables the service
+#            - Reports current state after action
+#
+# Usage:
+#   # Restart nginx on all web servers:
+#   ansible-playbook playbooks/service_control.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "svc_name=nginx svc_action=restarted target_hosts=web_servers"
+#
+#   # Stop and disable firewalld on a single host:
+#   ansible-playbook playbooks/service_control.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "svc_name=firewalld svc_action=stopped svc_enabled=false \
+#         target_hosts=vm01"
+#
+#   # Check status only (no changes):
+#   ansible-playbook playbooks/service_control.yml \
+#     -i ../inventory/hosts.ini \
+#     -e "svc_name=sshd svc_action=status"
+#
+# Required extra vars:
+#   svc_name          — systemd service name (with or without .service)
+#
+# Optional extra vars:
+#   svc_action        — started|stopped|restarted|reloaded|status
+#                       (default: status)
+#   svc_enabled       — true|false|unchanged  enable/disable at boot
+#                       (default: unchanged)
+#   target_hosts      — host pattern          (default: all)
+###############################################################
+
+- name: "Service Control — {{ svc_name | default('UNDEFINED') }} / {{ svc_action | default('status') }}"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: yes
+  become: yes
+
+  vars:
+    svc_action:  "{{ svc_action  | default('status') }}"
+    svc_enabled: "{{ svc_enabled | default('unchanged') }}"
+
+  pre_tasks:
+
+    - name: Validate svc_name is defined
+      assert:
+        that:
+          - svc_name is defined
+          - svc_name | length > 0
+        fail_msg: "Provide a service name: -e 'svc_name=<service>'"
+
+    - name: Validate svc_action value
+      assert:
+        that: svc_action in ['started', 'stopped', 'restarted', 'reloaded', 'status']
+        fail_msg: "svc_action must be one of: started, stopped, restarted, reloaded, status"
+
+    - name: Normalize service name (ensure .service suffix)
+      set_fact:
+        svc_unit: "{{ svc_name if svc_name.endswith('.service') else svc_name + '.service' }}"
+
+    - name: Check that unit file exists
+      shell: systemctl list-unit-files --no-pager --no-legend "{{ svc_unit }}" 2>/dev/null
+      register: r_unit_check
+      changed_when: false
+
+    - name: Warn if unit not found
+      debug:
+        msg: >
+          WARNING: unit '{{ svc_unit }}' not found on {{ inventory_hostname }}.
+          The service task will be skipped for this host.
+      when: r_unit_check.stdout | trim | length == 0
+
+  tasks:
+
+    # ── Status check (always runs, pre-action) ────────────────────────────────
+
+    - name: Get service status (pre-action)
+      shell: systemctl status "{{ svc_unit }}" --no-pager 2>&1 || true
+      register: r_status_before
+      changed_when: false
+
+    - name: Pre-action status
+      debug:
+        msg: "{{ r_status_before.stdout_lines }}"
+      when: svc_action == 'status'
+
+    # ── Service state change ─────────────────────────────────────────────────
+
+    - name: Apply service action — {{ svc_action }}
+      service:
+        name:  "{{ svc_unit }}"
+        state: "{{ svc_action }}"
+      register: r_svc
+      when:
+        - svc_action != 'status'
+        - r_unit_check.stdout | trim | length > 0
+
+    # ── Enable / disable at boot ──────────────────────────────────────────────
+
+    - name: Enable service at boot
+      service:
+        name:    "{{ svc_unit }}"
+        enabled: yes
+      when:
+        - svc_enabled | string | lower == 'true'
+        - r_unit_check.stdout | trim | length > 0
+
+    - name: Disable service at boot
+      service:
+        name:    "{{ svc_unit }}"
+        enabled: no
+      when:
+        - svc_enabled | string | lower == 'false'
+        - r_unit_check.stdout | trim | length > 0
+
+    # ── Post-action verification ──────────────────────────────────────────────
+
+    - name: Get service status (post-action)
+      shell: systemctl status "{{ svc_unit }}" --no-pager 2>&1 || true
+      register: r_status_after
+      changed_when: false
+      when: svc_action != 'status'
+
+    - name: Check if service is-active
+      shell: systemctl is-active "{{ svc_unit }}" 2>/dev/null || echo "inactive"
+      register: r_is_active
+      changed_when: false
+
+    - name: Check if service is-enabled
+      shell: systemctl is-enabled "{{ svc_unit }}" 2>/dev/null || echo "disabled"
+      register: r_is_enabled
+      changed_when: false
+
+    - name: Summary
+      debug:
+        msg:
+          - "Host       : {{ inventory_hostname }}"
+          - "Unit       : {{ svc_unit }}"
+          - "Action     : {{ svc_action }}"
+          - "Active     : {{ r_is_active.stdout }}"
+          - "Enabled    : {{ r_is_enabled.stdout }}"
+          - "Changed    : {{ r_svc.changed | default(false) }}"
+      when: r_unit_check.stdout | trim | length > 0
+
+    - name: Summary (unit not found)
+      debug:
+        msg: "SKIPPED — unit '{{ svc_unit }}' not found on {{ inventory_hostname }}"
+      when: r_unit_check.stdout | trim | length == 0
