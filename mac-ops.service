@@ -9,9 +9,10 @@ Type=simple
 User=macops
 Group=macops
 WorkingDirectory=/opt/mac-ops
+Environment="PYTHONUNBUFFERED=1"
 
-# Start the Flask/SocketIO server
-ExecStart=/home/macops/.venv/bin/python /opt/mac-ops/backend/app.py
+# Start the Flask/SocketIO server directly
+ExecStart=/usr/bin/python3 /opt/mac-ops/backend/app.py
 
 # Restart policy
 Restart=on-failure
@@ -22,8 +23,6 @@ StartLimitBurst=3
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=yes
 
 # Logging
 StandardOutput=journal
