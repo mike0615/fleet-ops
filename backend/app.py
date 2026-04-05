@@ -41,6 +41,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import paramiko
 
+# Add backend directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from models import db
+
 # ─── Path layout ─────────────────────────────────────────────────────────────
 BASE        = Path(__file__).resolve().parent.parent
 FRONTEND    = BASE / "frontend"
@@ -54,32 +59,115 @@ for _d in [PLAYBOOKS, INVENTORY, REPORTS, LOGS]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(LOGS / "mac-ops.log"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+def _configure_logging():
+    """Configure logging for the application."""
+    if not logging.root.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            handlers=[
+                logging.FileHandler(LOGS / "mac-ops.log"),
+                logging.StreamHandler(sys.stdout),
+            ],
+        )
+
+_configure_logging()
 log = logging.getLogger("mac-ops")
 log.info("mac-ops v1.1.0 starting — Author: Mike Anderson")
 
-# ─── App ──────────────────────────────────────────────────────────────────────
-app = Flask(__name__, static_folder=str(FRONTEND), static_url_path="")
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading',
-                    logger=False, engineio_logger=False)
-
-# Active SSH sessions keyed by Socket.IO session ID
+# ─── Global App Instance ──────────────────────────────────────────────────────
+_app_instance = None
+_socketio_instance = None
+_scheduler_instance = None
 _ssh_sessions: dict = {}
 _ssh_lock = threading.Lock()
 
-# ─── Scheduler ────────────────────────────────────────────────────────────────
-scheduler = BackgroundScheduler(daemon=True)
-scheduler.start()
+
+# ─── App ──────────────────────────────────────────────────────────────────────
+# The production app/socketio/scheduler are initialized lazily, not at module import time.
+# This allows tests to create fresh app instances without conflicts.
+
+_production_app = None
+_production_socketio = None
+_production_scheduler = None
+
+
+def _create_production_app():
+    """Create the production singleton app instance."""
+    global _production_app, _production_socketio, _production_scheduler
+    
+    if _production_app is None:
+        _production_app = Flask(__name__, static_folder=str(FRONTEND), static_url_path="")
+        CORS(_production_app)
+        _production_socketio = SocketIO(_production_app, cors_allowed_origins="*", 
+                                        async_mode='threading',
+                                        logger=False, engineio_logger=False)
+        _production_scheduler = BackgroundScheduler(daemon=True)
+        _production_scheduler.start()
+        
+        # Configure database for production (will be initialized in create_app)
+        db_dir = Path('/var/lib/mac-ops')
+        if not db_dir.exists():
+            try:
+                db_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                db_dir = Path.home() / '.mac-ops'
+                db_dir.mkdir(parents=True, exist_ok=True)
+        db_path = db_dir / 'mac.db'
+        _production_app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+        _production_app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    return _production_app, _production_socketio, _production_scheduler
+
+
+def create_app(testing: bool = False):
+    """
+    Application factory for creating Flask app instances.
+    
+    Args:
+        testing: If True, create a fresh instance for testing (don't reuse singleton)
+    
+    Returns:
+        Flask app instance with socketio attached
+    """
+    if testing:
+        # For testing, create a fresh app instance each time
+        app = Flask(__name__, static_folder=str(FRONTEND), static_url_path="")
+        CORS(app)
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        db.init_app(app)
+        return app
+    
+    # For production, use the singleton instance
+    prod_app, _, _ = _create_production_app()
+    
+    # Initialize database on first use
+    if len(db._app_engines) == 0:
+        db.init_app(prod_app)
+    
+    return prod_app
+
+
+# Lazy-initialize globals for production routes
+def _get_app_globals():
+    """Get app/socketio/scheduler for production mode."""
+    return _create_production_app()
+
+
+# These will be populated when first route is accessed
+app, socketio, scheduler = None, None, None
+
+
+def _init_globals():
+    """Initialize global app, socketio, scheduler references on first access."""
+    global app, socketio, scheduler
+    if app is None:
+        app, socketio, scheduler = _get_app_globals()
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+# Routes will be registered on-demand when the app is first created
+
 def load_schedules() -> list:
     if SCHED_FILE.exists():
         try:
@@ -155,6 +243,10 @@ def register_schedule(s: dict) -> None:
         log.info("Schedule registered: %s (%s)", s["name"], s["cron"])
     except Exception:
         log.exception("Failed to register schedule %s", s.get("id"))
+
+
+# ─── Initialize globals before defining routes ────────────────────────────────
+_init_globals()
 
 
 # ─── Static / index ───────────────────────────────────────────────────────────
@@ -753,5 +845,6 @@ def ssh_ws_resize(data):
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False,
+    app_instance = create_app()
+    socketio.run(app_instance, host="0.0.0.0", port=5000, debug=False,
                  allow_unsafe_werkzeug=True)

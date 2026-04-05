@@ -3,61 +3,9 @@ Integration tests for Maytag Admin Console authentication.
 """
 
 import pytest
-import os
-import tempfile
-from datetime import datetime
-
 from backend.models import db, User, Role, Permission, AuditLog, Secret
 from backend.auth import authenticate_local, create_user
 from backend.vault import SecretsVault
-
-
-@pytest.fixture
-def app():
-    """Create app for testing."""
-    from backend.app import create_app
-    
-    db_fd, db_path = tempfile.mkstemp()
-    app = create_app()
-    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
-    app.config['TESTING'] = True
-    app.config['WTF_CSRF_ENABLED'] = False
-
-    with app.app_context():
-        db.create_all()
-        _create_test_data()
-
-    yield app
-
-    os.close(db_fd)
-    os.unlink(db_path)
-
-
-@pytest.fixture
-def client(app):
-    """Create test client."""
-    return app.test_client()
-
-
-def _create_test_data():
-    """Create default test data."""
-    admin_role = Role(name='admin', description='Admin')
-    operator_role = Role(name='operator', description='Operator')
-    viewer_role = Role(name='viewer', description='Viewer')
-
-    perms = [
-        Permission(resource='ansible', action='view_playbooks'),
-        Permission(resource='ansible', action='execute_playbook'),
-        Permission(resource='admin', action='manage_users'),
-        Permission(resource='admin', action='manage_secrets'),
-    ]
-
-    admin_role.permissions = perms
-    operator_role.permissions = perms[:2]
-    viewer_role.permissions = [perms[0]]
-
-    db.session.add_all([admin_role, operator_role, viewer_role] + perms)
-    db.session.commit()
 
 
 class TestAuthentication:
