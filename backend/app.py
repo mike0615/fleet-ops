@@ -130,6 +130,9 @@ def _create_production_app():
         login_manager = LoginManager()
         init_login_manager(_production_app, login_manager)
         
+        # Register authentication routes
+        register_auth_routes(_production_app)
+        
         # Initialize database
         with _production_app.app_context():
             db.create_all()
