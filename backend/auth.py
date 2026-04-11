@@ -11,8 +11,8 @@ from datetime import datetime
 from flask import request
 from flask_login import LoginManager, UserMixin
 
-from backend.models import db, User, AuditLog
-from backend.config import get_config
+from models import db, User, AuditLog
+from config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ def create_user(
 
         # Assign roles
         if roles:
-            from backend.models import Role
+from models import db, Role
             for role_name in roles:
                 role = Role.query.filter_by(name=role_name).first()
                 if role:
@@ -190,7 +190,7 @@ def authenticate_ldap(username: str, password: str) -> Tuple[Optional[User], str
         Tuple of (User object or None, message)
     """
     try:
-        from backend.ldap_auth import LDAPAuth
+        from ldap_auth import LDAPAuth
         ldap_auth = LDAPAuth()
         user, msg = ldap_auth.authenticate_user(username, password)
         

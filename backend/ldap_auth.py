@@ -7,8 +7,8 @@ from typing import Optional, Tuple
 import ldap
 from ldap.modlist import addModlist
 
-from backend.models import db, User, Role
-from backend.config import get_config
+from models import db, User, Role
+from config import get_config
 
 logger = logging.getLogger(__name__)
 

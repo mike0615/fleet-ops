@@ -6,9 +6,9 @@ Provides endpoints for managing encrypted secrets.
 from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 
-from backend.models import db, Secret
-from backend.vault import get_vault
-from backend.admin_routes import require_permission
+from models import db, Secret
+from vault import get_vault
+from admin_routes import require_permission
 
 secrets_bp = Blueprint('secrets', __name__, url_prefix='/admin/secrets')
 
