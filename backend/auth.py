@@ -11,7 +11,7 @@ from datetime import datetime
 from flask import request
 from flask_login import LoginManager, UserMixin
 
-from models import db, User, AuditLog
+from models import db, User, AuditLog, Role
 from config import get_config
 
 logger = logging.getLogger(__name__)
