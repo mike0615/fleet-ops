@@ -178,7 +178,8 @@
 
         <form id="loginForm">
             <div class="auth-methods">
-                <button type="button" class="auth-method-btn active" data-auth="local">Local</button>
+                <button type="button" class="auth-method-btn active" data-auth="auto">Auto</button>
+                <button type="button" class="auth-method-btn" data-auth="local">Local</button>
                 <button type="button" class="auth-method-btn" data-auth="ldap">LDAP/FreeIPA</button>
             </div>
 
@@ -248,7 +249,7 @@
         const successAlert = document.getElementById('successAlert');
         const authMethodBtns = document.querySelectorAll('.auth-method-btn');
 
-        let selectedAuthMethod = 'local';
+        let selectedAuthMethod = 'auto';
 
         // Auth method selection
         authMethodBtns.forEach(btn => {
