@@ -281,19 +281,27 @@ def login_page():
 
 @app.route("/auth/login", methods=["POST"])
 def api_login():
-    """API endpoint for user authentication."""
+    """API endpoint for user authentication.
+    
+    POST data should include:
+        - username: Username
+        - password: Password
+        - auth_method: 'local', 'ldap', or 'auto' (default)
+        - remember_me: boolean (optional)
+    """
     try:
         data = request.get_json() or {}
         username = data.get('username', '').strip()
         password = data.get('password', '')
+        auth_method = data.get('auth_method', 'auto').lower()
         
         if not username or not password:
             return jsonify({"error": "Username and password required"}), 400
         
         # Import authentication helpers
-        from auth import authenticate_local, AuthenticatedUser
+        from auth import authenticate, AuthenticatedUser
         
-        user, msg = authenticate_local(username, password)
+        user, msg = authenticate(username, password, auth_method)
         if not user:
             return jsonify({"error": msg}), 401
         
@@ -308,6 +316,7 @@ def api_login():
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
+                "auth_method": user.auth_method,
                 "roles": [r.name for r in user.roles],
             }
         }), 200
@@ -322,6 +331,35 @@ def api_logout():
     from flask_login import logout_user
     logout_user()
     return jsonify({"message": "Logout successful"}), 200
+
+
+@app.route("/auth/status", methods=["GET"])
+def auth_status():
+    """Check authentication system status (LDAP connectivity, etc)."""
+    try:
+        from config import get_config
+        config = get_config()
+        
+        status = {
+            "ldap_enabled": config.get('LDAP_ENABLED', False),
+            "ldap_connected": False,
+            "ldap_error": None
+        }
+        
+        if status['ldap_enabled']:
+            try:
+                from ldap_auth import test_ldap_connection
+                success, msg = test_ldap_connection()
+                status['ldap_connected'] = success
+                if not success:
+                    status['ldap_error'] = msg
+            except Exception as e:
+                status['ldap_error'] = str(e)
+        
+        return jsonify(status), 200
+    except Exception as e:
+        log.error(f"Auth status error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/vendor/codemirror/<path:filename>")
