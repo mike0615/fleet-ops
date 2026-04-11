@@ -1,21 +1,63 @@
-# mac-ops — Maytag Ansible Console
+# Maytag Admin Console (MAC)
 
 **Author:** Mike Anderson
-**Version:** 1.2.0
+**Version:** 2.0.0
 **License:** MIT
 **Platform:** Rocky Linux 9.x
 
 ---
 
-mac-ops is a self-hosted, browser-based Ansible management platform purpose-built for Maytag IT infrastructure. It replaces command-line Ansible operations with a polished web interface — write, validate, execute, schedule, and report on automation playbooks without direct CLI access.
+**Maytag Admin Console (MAC)** is a unified infrastructure management platform with enterprise-grade authentication and a pluggable tool architecture. Originally developed as mac-ops (Ansible console), it now provides a comprehensive admin interface with built-in tools for infrastructure automation, system administration, and cloud operations.
 
-**Designed for airgapped environments.** All frontend assets (CodeMirror editor, fonts) are bundled locally. No CDN dependencies at runtime for the main console. The SSH Console page uses xterm.js and Socket.IO from CDN and requires internet access or a local mirror.
+### Key Features
+
+- **Enterprise Authentication** - Local user management, FreeIPA/LDAP integration, role-based access control (RBAC)
+- **Secrets Vault** - Encrypted storage for API keys, passwords, tokens with fine-grained access control
+- **Pluggable Tool Framework** - Extensible architecture for adding new admin tools
+- **Audit Logging** - Comprehensive security event tracking with detailed audit trail
+- **Beautiful Admin Dashboard** - Modern web interface for user and permission management
+- **Ansible Integration** - Execute and schedule Ansible playbooks securely
+
+### Tools Included
+
+1. **Ansible** - Write, validate, execute, schedule, and report on automation playbooks
+2. **PXE Boot** - Network boot server integration (LRN-PXE)
+3. **Future Tools** - DHCP manager, DNS manager (Bind), monitoring dashboard, Netbox links
+
+**Designed for airgapped environments.** All frontend assets are bundled locally. No external dependencies at runtime.
 
 ---
 
-## Features
+## Getting Started
 
-### Main Console (`/`)
+### Quick Installation
+
+```bash
+# Install
+pip install -r backend/requirements.txt
+
+# Initialize
+python backend/manage.py init-db
+python backend/manage.py create-admin
+
+# Run
+python backend/app.py
+```
+
+Visit `https://localhost:5000/auth/login`
+
+### Docker Deployment
+
+```bash
+docker build -t mac-ops .
+docker run -d \
+  -p 5000:5000 \
+  -v /var/lib/mac-ops:/var/lib/mac-ops \
+  -v /etc/mac-ops:/etc/mac-ops \
+  mac-ops
+```
+
+For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)
 
 - **Dashboard** — At-a-glance counts for playbooks, inventory files, reports, schedules, and active schedules. Shows the 10 most recent run logs with pass/fail status and timestamps. Quick Action buttons for common tasks (New Playbook, View Reports, Schedule Job).
 - **Playbook Editor** — Full-featured CodeMirror 5 YAML editor with syntax highlighting, live validation, and undo history isolation per file. Recursive sidebar file browser with expand/collapse folder tree and breadcrumb path bar. Create, edit, save, upload, and delete playbooks. New Folder button creates subdirectory structure directly from the UI (e.g. `linux/`, `networking/`, `docker/`).

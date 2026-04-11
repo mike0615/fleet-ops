@@ -37,9 +37,17 @@ from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+from flask_login import LoginManager, current_user
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import paramiko
+
+# Add backend directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from models import db
+from auth import init_login_manager
+from auth_routes import register_auth_routes
 
 # ─── Path layout ─────────────────────────────────────────────────────────────
 BASE        = Path(__file__).resolve().parent.parent
@@ -54,32 +62,127 @@ for _d in [PLAYBOOKS, INVENTORY, REPORTS, LOGS]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(LOGS / "mac-ops.log"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+def _configure_logging():
+    """Configure logging for the application."""
+    if not logging.root.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            handlers=[
+                logging.FileHandler(LOGS / "mac-ops.log"),
+                logging.StreamHandler(sys.stdout),
+            ],
+        )
+
+_configure_logging()
 log = logging.getLogger("mac-ops")
 log.info("mac-ops v1.1.0 starting — Author: Mike Anderson")
 
-# ─── App ──────────────────────────────────────────────────────────────────────
-app = Flask(__name__, static_folder=str(FRONTEND), static_url_path="")
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading',
-                    logger=False, engineio_logger=False)
-
-# Active SSH sessions keyed by Socket.IO session ID
+# ─── Global App Instance ──────────────────────────────────────────────────────
+_app_instance = None
+_socketio_instance = None
+_scheduler_instance = None
 _ssh_sessions: dict = {}
 _ssh_lock = threading.Lock()
 
-# ─── Scheduler ────────────────────────────────────────────────────────────────
-scheduler = BackgroundScheduler(daemon=True)
-scheduler.start()
+
+# ─── App ──────────────────────────────────────────────────────────────────────
+# The production app/socketio/scheduler are initialized lazily, not at module import time.
+# This allows tests to create fresh app instances without conflicts.
+
+_production_app = None
+_production_socketio = None
+_production_scheduler = None
+
+
+def _create_production_app():
+    """Create the production singleton app instance."""
+    global _production_app, _production_socketio, _production_scheduler
+    
+    if _production_app is None:
+        _production_app = Flask(__name__, static_folder=str(FRONTEND), static_url_path="")
+        CORS(_production_app)
+        _production_socketio = SocketIO(_production_app, cors_allowed_origins="*", 
+                                        async_mode='threading',
+                                        logger=False, engineio_logger=False)
+        _production_scheduler = BackgroundScheduler(daemon=True)
+        _production_scheduler.start()
+        
+        # Configure database for production (will be initialized in create_app)
+        db_dir = Path('/var/lib/mac-ops')
+        if not db_dir.exists():
+            try:
+                db_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                db_dir = Path.home() / '.mac-ops'
+                db_dir.mkdir(parents=True, exist_ok=True)
+        db_path = db_dir / 'mac.db'
+        _production_app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+        _production_app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        _production_app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
+        _production_app.config['SESSION_COOKIE_SECURE'] = True
+        _production_app.config['SESSION_COOKIE_HTTPONLY'] = True
+        _production_app.config['REMEMBER_COOKIE_SECURE'] = True
+        _production_app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+        
+        # Initialize database and login manager
+        db.init_app(_production_app)
+        login_manager = LoginManager()
+        init_login_manager(_production_app, login_manager)
+        
+        # Register authentication routes
+        with _production_app.app_context():
+            register_auth_routes(_production_app)
+            db.create_all()
+    
+    return _production_app, _production_socketio, _production_scheduler
+    
+    return _production_app, _production_socketio, _production_scheduler
+
+
+def create_app(testing: bool = False):
+    """
+    Application factory for creating Flask app instances.
+    
+    Args:
+        testing: If True, create a fresh instance for testing (don't reuse singleton)
+    
+    Returns:
+        Flask app instance with socketio attached
+    """
+    if testing:
+        # For testing, create a fresh app instance each time
+        app = Flask(__name__, static_folder=str(FRONTEND), static_url_path="")
+        CORS(app)
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        db.init_app(app)
+        return app
+    
+    # For production, use the singleton instance
+    prod_app, _, _ = _create_production_app()
+    return prod_app
+
+
+# Lazy-initialize globals for production routes
+def _get_app_globals():
+    """Get app/socketio/scheduler for production mode."""
+    return _create_production_app()
+
+
+# These will be populated when first route is accessed
+app, socketio, scheduler = None, None, None
+
+
+def _init_globals():
+    """Initialize global app, socketio, scheduler references on first access."""
+    global app, socketio, scheduler
+    if app is None:
+        app, socketio, scheduler = _get_app_globals()
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+# Routes will be registered on-demand when the app is first created
+
 def load_schedules() -> list:
     if SCHED_FILE.exists():
         try:
@@ -157,10 +260,26 @@ def register_schedule(s: dict) -> None:
         log.exception("Failed to register schedule %s", s.get("id"))
 
 
+# ─── Initialize globals before defining routes ────────────────────────────────
+_init_globals()
+
+
 # ─── Static / index ───────────────────────────────────────────────────────────
 @app.route("/")
 def index():
+    """Serve app dashboard (redirects to login if not authenticated)."""
+    if not current_user.is_authenticated:
+        return send_from_directory(str(FRONTEND), "login.html")
     return send_from_directory(str(FRONTEND), "index.html")
+
+
+@app.route("/login")
+def login_page():
+    """Serve login page."""
+    if current_user.is_authenticated:
+        # Redirect to dashboard if already logged in
+        return send_from_directory(str(FRONTEND), "index.html")
+    return send_from_directory(str(FRONTEND), "login.html")
 
 
 @app.route("/vendor/codemirror/<path:filename>")
@@ -753,5 +872,6 @@ def ssh_ws_resize(data):
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False,
+    app_instance = create_app()
+    socketio.run(app_instance, host="0.0.0.0", port=5000, debug=False,
                  allow_unsafe_werkzeug=True)
