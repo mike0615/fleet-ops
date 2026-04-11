@@ -130,12 +130,9 @@ def _create_production_app():
         login_manager = LoginManager()
         init_login_manager(_production_app, login_manager)
         
-        # Register authentication routes
+        # Initialize database
         with _production_app.app_context():
-            register_auth_routes(_production_app)
             db.create_all()
-    
-    return _production_app, _production_socketio, _production_scheduler
     
     return _production_app, _production_socketio, _production_scheduler
 
@@ -280,6 +277,51 @@ def login_page():
         # Redirect to dashboard if already logged in
         return send_from_directory(str(FRONTEND), "index.html")
     return send_from_directory(str(FRONTEND), "login.html")
+
+
+@app.route("/auth/login", methods=["POST"])
+def api_login():
+    """API endpoint for user authentication."""
+    try:
+        data = request.get_json() or {}
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        
+        if not username or not password:
+            return jsonify({"error": "Username and password required"}), 400
+        
+        # Import authentication helpers
+        from auth import authenticate_local, AuthenticatedUser
+        
+        user, msg = authenticate_local(username, password)
+        if not user:
+            return jsonify({"error": msg}), 401
+        
+        # Log in the user
+        from flask_login import login_user
+        auth_user = AuthenticatedUser(user)
+        login_user(auth_user, remember=data.get('remember_me', False))
+        
+        return jsonify({
+            "message": "Login successful",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "roles": [r.name for r in user.roles],
+            }
+        }), 200
+    except Exception as e:
+        log.error(f"Login error: {e}", exc_info=True)
+        return jsonify({"error": "Login failed"}), 500
+
+
+@app.route("/auth/logout", methods=["POST"])
+def api_logout():
+    """API endpoint for user logout."""
+    from flask_login import logout_user
+    logout_user()
+    return jsonify({"message": "Logout successful"}), 200
 
 
 @app.route("/vendor/codemirror/<path:filename>")
