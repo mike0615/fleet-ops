@@ -37,6 +37,7 @@ from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+from flask_login import LoginManager, current_user
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import paramiko
@@ -45,6 +46,8 @@ import paramiko
 sys.path.insert(0, str(Path(__file__).parent))
 
 from models import db
+from auth import init_login_manager
+from auth_routes import register_auth_routes
 
 # ─── Path layout ─────────────────────────────────────────────────────────────
 BASE        = Path(__file__).resolve().parent.parent
@@ -116,6 +119,23 @@ def _create_production_app():
         db_path = db_dir / 'mac.db'
         _production_app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
         _production_app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        _production_app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
+        _production_app.config['SESSION_COOKIE_SECURE'] = True
+        _production_app.config['SESSION_COOKIE_HTTPONLY'] = True
+        _production_app.config['REMEMBER_COOKIE_SECURE'] = True
+        _production_app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+        
+        # Initialize database and login manager
+        db.init_app(_production_app)
+        login_manager = LoginManager()
+        init_login_manager(_production_app, login_manager)
+        
+        # Register authentication routes
+        with _production_app.app_context():
+            register_auth_routes(_production_app)
+            db.create_all()
+    
+    return _production_app, _production_socketio, _production_scheduler
     
     return _production_app, _production_socketio, _production_scheduler
 
@@ -141,11 +161,6 @@ def create_app(testing: bool = False):
     
     # For production, use the singleton instance
     prod_app, _, _ = _create_production_app()
-    
-    # Initialize database on first use
-    if len(db._app_engines) == 0:
-        db.init_app(prod_app)
-    
     return prod_app
 
 
@@ -252,7 +267,19 @@ _init_globals()
 # ─── Static / index ───────────────────────────────────────────────────────────
 @app.route("/")
 def index():
+    """Serve app dashboard (redirects to login if not authenticated)."""
+    if not current_user.is_authenticated:
+        return send_from_directory(str(FRONTEND), "login.html")
     return send_from_directory(str(FRONTEND), "index.html")
+
+
+@app.route("/login")
+def login_page():
+    """Serve login page."""
+    if current_user.is_authenticated:
+        # Redirect to dashboard if already logged in
+        return send_from_directory(str(FRONTEND), "index.html")
+    return send_from_directory(str(FRONTEND), "login.html")
 
 
 @app.route("/vendor/codemirror/<path:filename>")
