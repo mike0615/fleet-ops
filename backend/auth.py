@@ -128,7 +128,6 @@ def create_user(
 
         # Assign roles
         if roles:
-from models import db, Role
             for role_name in roles:
                 role = Role.query.filter_by(name=role_name).first()
                 if role:
