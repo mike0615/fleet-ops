@@ -703,28 +703,6 @@ def del_report(name):
     return jsonify({"success": True})
 
 
-# ─── Logs ─────────────────────────────────────────────────────────────────────
-@app.route("/api/logs")
-def list_logs():
-    logs = []
-    for p in sorted(LOGS.glob("run_*.log"),
-                    key=lambda x: x.stat().st_mtime, reverse=True)[:60]:
-        logs.append({
-            "name":     p.name,
-            "size":     p.stat().st_size,
-            "modified": fmtime(p),
-        })
-    return jsonify(logs)
-
-
-@app.route("/api/logs/<name>")
-def get_log(name):
-    p = LOGS / name
-    if not p.exists():
-        return jsonify({"error": "Not found"}), 404
-    return jsonify({"name": name, "content": p.read_text(errors="replace")})
-
-
 # ─── Boot: restore schedules ──────────────────────────────────────────────────
 for _s in load_schedules():
     if _s.get("enabled"):
