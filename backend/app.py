@@ -824,6 +824,76 @@ def api_hostcheck():
 
 
 # ─── SSH Console ──────────────────────────────────────────────────────────────
+
+# ─── Logs ──────────────────────────────────────────────────────────────────────
+@app.route("/api/logs")
+def list_logs():
+    """List all available log files."""
+    try:
+        logs = []
+        if LOGS.exists():
+            for log_file in sorted(LOGS.glob("*.log"), reverse=True):
+                try:
+                    stat = log_file.stat()
+                    logs.append({
+                        "name": log_file.name,
+                        "size": stat.st_size,
+                        "modified": stat.st_mtime,
+                        "path": str(log_file.relative_to(LOGS))
+                    })
+                except Exception:
+                    pass
+        return jsonify(logs)
+    except Exception as exc:
+        log.exception("Error listing logs")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/logs/<path:name>")
+def read_log(name):
+    """Read a specific log file with pagination."""
+    try:
+        # Prevent directory traversal
+        if ".." in name or name.startswith("/"):
+            return jsonify({"error": "Invalid log name"}), 400
+        
+        log_path = LOGS / name
+        if not log_path.exists() or not log_path.is_file():
+            return jsonify({"error": "Log file not found"}), 404
+        
+        # Get pagination parameters
+        lines_param = request.args.get("lines", "100", type=int)
+        lines_param = min(max(lines_param, 10), 1000)  # Clamp between 10-1000
+        skip_lines = request.args.get("skip", "0", type=int)
+        
+        # Read file
+        try:
+            content = log_path.read_text(errors="replace")
+        except Exception as exc:
+            return jsonify({"error": f"Error reading log: {str(exc)}"}), 500
+        
+        all_lines = content.split("\n")
+        total = len(all_lines)
+        
+        # Apply pagination
+        start_idx = max(0, total - skip_lines - lines_param)
+        end_idx = total - skip_lines
+        
+        lines = all_lines[start_idx:end_idx]
+        
+        return jsonify({
+            "file": name,
+            "size": log_path.stat().st_size,
+            "total_lines": total,
+            "lines": lines,
+            "start": start_idx,
+            "end": end_idx,
+            "has_more": start_idx > 0
+        })
+    except Exception as exc:
+        log.exception("Error reading log")
+        return jsonify({"error": str(exc)}), 500
+
 @app.route("/ssh-console")
 def ssh_console_page():
     """Serve the web-based SSH terminal page."""
