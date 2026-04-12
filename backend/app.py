@@ -120,10 +120,13 @@ def _create_production_app():
         _production_app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
         _production_app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
         _production_app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
-        _production_app.config['SESSION_COOKIE_SECURE'] = True
+        # Only set SECURE flag if running over HTTPS (check environment or scheme)
+        is_https = os.environ.get('HTTPS', '').lower() in ('true', '1', 'yes') or os.environ.get('SCHEME') == 'https'
+        _production_app.config['SESSION_COOKIE_SECURE'] = is_https
         _production_app.config['SESSION_COOKIE_HTTPONLY'] = True
-        _production_app.config['REMEMBER_COOKIE_SECURE'] = True
+        _production_app.config['REMEMBER_COOKIE_SECURE'] = is_https
         _production_app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+        _production_app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
         
         # Initialize database and login manager
         db.init_app(_production_app)
