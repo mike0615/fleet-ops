@@ -6,8 +6,8 @@ Provides login/logout endpoints and session management.
 from flask import Blueprint, request, jsonify, session, redirect, url_for
 from flask_login import login_user, logout_user, login_required, current_user
 
-from backend.models import db, User
-from backend.auth import authenticate_local, log_auth_event
+from models import db, User
+from auth import authenticate_local, log_auth_event
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
@@ -34,7 +34,7 @@ def login():
             return jsonify({"error": msg}), 401
 
         # Create authenticated wrapper
-        from backend.auth import AuthenticatedUser
+        from auth import AuthenticatedUser
         auth_user = AuthenticatedUser(user)
         login_user(auth_user, remember=data.get('remember_me', False))
 

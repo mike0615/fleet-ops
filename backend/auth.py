@@ -11,7 +11,8 @@ from datetime import datetime
 from flask import request
 from flask_login import LoginManager, UserMixin
 
-from backend.models import db, User, AuditLog
+from models import db, User, AuditLog, Role
+from config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,6 @@ def create_user(
 
         # Assign roles
         if roles:
-            from backend.models import Role
             for role_name in roles:
                 role = Role.query.filter_by(name=role_name).first()
                 if role:
@@ -175,6 +175,81 @@ def authenticate_local(username: str, password: str) -> Tuple[Optional[User], st
     logger.info(f"User authenticated: {username}")
 
     return user, "Authentication successful"
+
+
+def authenticate_ldap(username: str, password: str) -> Tuple[Optional[User], str]:
+    """
+    Authenticate user with LDAP.
+
+    Args:
+        username: Username
+        password: Password
+
+    Returns:
+        Tuple of (User object or None, message)
+    """
+    try:
+        from ldap_auth import LDAPAuth
+        ldap_auth = LDAPAuth()
+        user, msg = ldap_auth.authenticate_user(username, password)
+        
+        if user:
+            if not user.enabled:
+                log_auth_event('login_failed', f'user_disabled: {username}')
+                return None, "User account is disabled"
+            
+            user.record_login()
+            log_auth_event('login_success', f'ldap_user: {username}')
+            logger.info(f"LDAP user authenticated: {username}")
+        else:
+            log_auth_event('login_failed', f'ldap_auth_failed: {username}')
+            logger.warning(f"LDAP authentication failed for {username}: {msg}")
+        
+        return user, msg
+    
+    except Exception as e:
+        logger.error(f"LDAP authentication error: {e}")
+        log_auth_event('login_failed', f'ldap_error: {str(e)}')
+        return None, f"LDAP authentication error: {e}"
+
+
+def authenticate(
+    username: str, 
+    password: str, 
+    auth_method: str = 'auto'
+) -> Tuple[Optional[User], str]:
+    """
+    Authenticate user with specified or auto-detected method.
+
+    Args:
+        username: Username
+        password: Password
+        auth_method: 'local', 'ldap', or 'auto' to try both
+
+    Returns:
+        Tuple of (User object or None, message)
+    """
+    if auth_method == 'local':
+        return authenticate_local(username, password)
+    
+    elif auth_method == 'ldap':
+        return authenticate_ldap(username, password)
+    
+    elif auth_method == 'auto':
+        # Try LDAP first if enabled, then fall back to local
+        config = get_config()
+        if config.get('LDAP_ENABLED'):
+            user, msg = authenticate_ldap(username, password)
+            if user:
+                return user, msg
+            # Fall through to local auth if LDAP fails
+            logger.debug(f"LDAP auth failed for {username}, trying local auth")
+        
+        # Try local authentication
+        return authenticate_local(username, password)
+    
+    else:
+        return None, f"Unknown authentication method: {auth_method}"
 
 
 def log_auth_event(action: str, details: str = "") -> None:

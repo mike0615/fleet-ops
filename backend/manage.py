@@ -13,8 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from flask import Flask
-from backend.models import db, User, Role, init_db, create_default_roles
-from backend.auth import create_user, validate_password
+from models import db, User, Role, init_db, create_default_roles
+from auth import create_user, validate_password
 
 
 def create_app():
@@ -203,7 +203,7 @@ def cmd_reset_password(app):
             return
 
         password = getpass.getpass("Enter new password: ")
-        from backend.auth import validate_password
+        from auth import validate_password
         valid, msg = validate_password(password)
         if not valid:
             print(f"✗ {msg}")

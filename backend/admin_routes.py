@@ -6,8 +6,8 @@ Provides endpoints for user/role/permission management.
 from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 
-from backend.models import db, User, Role, Permission, AuditLog
-from backend.auth import create_user, disable_user, enable_user, reset_password
+from models import db, User, Role, Permission, AuditLog
+from auth import create_user, disable_user, enable_user, reset_password
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 

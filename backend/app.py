@@ -131,11 +131,11 @@ def _create_production_app():
         init_login_manager(_production_app, login_manager)
         
         # Register authentication routes
+        register_auth_routes(_production_app)
+        
+        # Initialize database
         with _production_app.app_context():
-            register_auth_routes(_production_app)
             db.create_all()
-    
-    return _production_app, _production_socketio, _production_scheduler
     
     return _production_app, _production_socketio, _production_scheduler
 
@@ -280,6 +280,89 @@ def login_page():
         # Redirect to dashboard if already logged in
         return send_from_directory(str(FRONTEND), "index.html")
     return send_from_directory(str(FRONTEND), "login.html")
+
+
+@app.route("/auth/login", methods=["POST"])
+def api_login():
+    """API endpoint for user authentication.
+    
+    POST data should include:
+        - username: Username
+        - password: Password
+        - auth_method: 'local', 'ldap', or 'auto' (default)
+        - remember_me: boolean (optional)
+    """
+    try:
+        data = request.get_json() or {}
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        auth_method = data.get('auth_method', 'auto').lower()
+        
+        if not username or not password:
+            return jsonify({"error": "Username and password required"}), 400
+        
+        # Import authentication helpers
+        from auth import authenticate, AuthenticatedUser
+        
+        user, msg = authenticate(username, password, auth_method)
+        if not user:
+            return jsonify({"error": msg}), 401
+        
+        # Log in the user
+        from flask_login import login_user
+        auth_user = AuthenticatedUser(user)
+        login_user(auth_user, remember=data.get('remember_me', False))
+        
+        return jsonify({
+            "message": "Login successful",
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "auth_method": user.auth_method,
+                "roles": [r.name for r in user.roles],
+            }
+        }), 200
+    except Exception as e:
+        log.error(f"Login error: {e}", exc_info=True)
+        return jsonify({"error": "Login failed"}), 500
+
+
+@app.route("/auth/logout", methods=["POST"])
+def api_logout():
+    """API endpoint for user logout."""
+    from flask_login import logout_user
+    logout_user()
+    return jsonify({"message": "Logout successful"}), 200
+
+
+@app.route("/auth/status", methods=["GET"])
+def auth_status():
+    """Check authentication system status (LDAP connectivity, etc)."""
+    try:
+        from config import get_config
+        config = get_config()
+        
+        status = {
+            "ldap_enabled": config.get('LDAP_ENABLED', False),
+            "ldap_connected": False,
+            "ldap_error": None
+        }
+        
+        if status['ldap_enabled']:
+            try:
+                from ldap_auth import test_ldap_connection
+                success, msg = test_ldap_connection()
+                status['ldap_connected'] = success
+                if not success:
+                    status['ldap_error'] = msg
+            except Exception as e:
+                status['ldap_error'] = str(e)
+        
+        return jsonify(status), 200
+    except Exception as e:
+        log.error(f"Auth status error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/vendor/codemirror/<path:filename>")
