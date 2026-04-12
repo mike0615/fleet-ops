@@ -276,6 +276,14 @@ def index():
     return send_from_directory(str(FRONTEND), "index.html")
 
 
+@app.route("/logs")
+def logs_page():
+    """Serve the log reader page."""
+    if not current_user.is_authenticated:
+        return redirect("/login")
+    return send_from_directory(str(FRONTEND), "logs.html")
+
+
 @app.route("/login")
 def login_page():
     """Serve login page."""

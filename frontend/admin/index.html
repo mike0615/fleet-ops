@@ -199,6 +199,9 @@
                     <a class="nav-link" href="#audit-tab">
                         <i class="fas fa-history"></i> Audit Logs
                     </a>
+                    <a class="nav-link" onclick="openLogReader()" style="cursor: pointer;">
+                        <i class="fas fa-file-lines"></i> View Logs
+                    </a>
                     <hr style="border-color: rgba(255,255,255,0.2);">
                     <a class="nav-link" href="/">
                         <i class="fas fa-arrow-left"></i> Back to Dashboard
@@ -561,6 +564,11 @@
 
         // Load users on page load
         loadUsers();
+
+        // Open log reader in new window
+        function openLogReader() {
+            window.open('/logs', 'LogReader', 'width=1200,height=800,resizable=yes,scrollbars=yes');
+        }
     </script>
 </body>
 </html>
