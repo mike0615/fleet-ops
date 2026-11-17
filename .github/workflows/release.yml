@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: fleetops-release
+  cancel-in-progress: true
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -25,4 +28,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v2.1.0 --draft --target "${{ github.sha }}" --title 'FleetOps 2.1.0' --notes-file RELEASE_NOTES.md releases/2.1.0/*.tar.gz releases/2.1.0/el9/rpms/fleetops-*.rpm releases/2.1.0/el10/rpms/fleetops-*.rpm releases/2.1.0/SHA256SUMS
+          if gh release view v2.1.0 >/dev/null 2>&1; then
+            gh release edit v2.1.0 --draft --target "${{ github.sha }}" --title 'FleetOps 2.1.0' --notes-file RELEASE_NOTES.md
+            gh release upload v2.1.0 --clobber releases/2.1.0/*.tar.gz releases/2.1.0/el9/rpms/fleetops-*.rpm releases/2.1.0/el10/rpms/fleetops-*.rpm releases/2.1.0/SHA256SUMS
+          else
+            gh release create v2.1.0 --draft --target "${{ github.sha }}" --title 'FleetOps 2.1.0' --notes-file RELEASE_NOTES.md releases/2.1.0/*.tar.gz releases/2.1.0/el9/rpms/fleetops-*.rpm releases/2.1.0/el10/rpms/fleetops-*.rpm releases/2.1.0/SHA256SUMS
+          fi

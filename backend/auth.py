@@ -54,7 +54,7 @@ class AuthenticatedUser(UserMixin):
 def init_login_manager(app, login_manager: LoginManager) -> None:
     """Initialize Flask-Login with FleetOps."""
     login_manager.init_app(app)
-    login_manager.login_view = 'login'
+    login_manager.login_view = 'login_page'
     login_manager.login_message = 'Please log in to access this page.'
 
     @login_manager.user_loader

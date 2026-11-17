@@ -53,6 +53,9 @@ class RuntimeSmoke(unittest.TestCase):
         client = app.test_client()
         self.assertEqual(client.get('/api/dashboard').status_code, 401)
         self.assertEqual(client.post('/api/adhoc', json={}).status_code, 401)
+        response = client.get('/auth/me')
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login', response.headers['Location'])
         ws = socketio.test_client(app, namespace='/ssh', flask_test_client=client)
         self.assertFalse(ws.is_connected('/ssh'))
 
