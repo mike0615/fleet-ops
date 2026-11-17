@@ -1,5 +1,5 @@
 """
-SQLAlchemy models for Maytag Admin Console (MAC).
+SQLAlchemy models for FleetOps.
 Includes User, Role, Permission, Secret, and other domain models.
 """
 
@@ -143,6 +143,17 @@ class Secret(db.Model):
 
     def __repr__(self) -> str:
         return f'<Secret {self.name}>'
+
+
+class SSHCredential(db.Model):
+    """Owner-scoped connection settings; all connection details are encrypted."""
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    label = db.Column(db.String(128), nullable=False)
+    value_encrypted = db.Column(db.LargeBinary, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    owner = db.relationship('User', backref=db.backref('ssh_credentials', cascade='all, delete-orphan'))
+    __table_args__ = (db.UniqueConstraint('owner_id', 'label', name='uq_ssh_owner_label'),)
 
 
 class AuditLog(db.Model):

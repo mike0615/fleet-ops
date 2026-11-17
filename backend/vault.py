@@ -1,10 +1,11 @@
 """
-Secrets vault for Maytag Admin Console.
+Secrets vault for FleetOps.
 Provides encryption/decryption of sensitive data at rest.
 """
 
 import os
 import logging
+from pathlib import Path
 from typing import Optional
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -22,15 +23,18 @@ class SecretsVault:
             key: Encryption key (bytes). If None, will be loaded from environment or generated.
         """
         if key is None:
-            key_str = os.environ.get('MAC_SECRETS_KEY')
+            key_str = os.environ.get('FLEETOPS_SECRETS_KEY')
+            key_file = Path(os.environ.get('FLEETOPS_VAULT_KEY_FILE', '/etc/fleetops/vault.key'))
+            if not key_str and key_file.exists():
+                key_str = key_file.read_text().strip()
             if key_str:
                 key = key_str.encode()
             else:
                 # Generate a new key (should be persisted in production)
                 key = Fernet.generate_key()
                 logger.warning(
-                    "No MAC_SECRETS_KEY found. Generated new key. "
-                    "Store this in /etc/mac-ops/.secrets_key or MAC_SECRETS_KEY environment variable."
+                    "No FLEETOPS_SECRETS_KEY found. Generated new key. "
+                    "Store this in /etc/fleetops/.secrets_key or FLEETOPS_SECRETS_KEY environment variable."
                 )
 
         try:
@@ -141,25 +145,16 @@ def init_vault(app) -> None:
     """Initialize the global secrets vault."""
     global vault
 
-    # Try to load key from file first
-    key_file = '/etc/mac-ops/.secrets_key'
-    key = None
-
-    if os.path.exists(key_file):
-        try:
-            key = SecretsVault.load_key_from_file(key_file)
-        except Exception as e:
-            logger.error(f"Failed to load key from {key_file}: {e}")
-
-    # Initialize vault
+    key = os.environ.get('FLEETOPS_SECRETS_KEY')
+    if key:
+        key = key.encode('ascii')
+    else:
+        key_file = Path(os.environ.get('FLEETOPS_VAULT_KEY_FILE', '/etc/fleetops/vault.key'))
+        if not key_file.is_file():
+            raise RuntimeError('Persistent vault key is missing; restore it or run the installer. No temporary key will be used.')
+        key = key_file.read_bytes().strip()
     vault = SecretsVault(key)
-
-    # If key was generated, save it
-    if key is None:
-        try:
-            SecretsVault.save_key_to_file(vault.cipher._signing_key + vault.cipher._encryption_key, key_file)
-        except Exception as e:
-            logger.warning(f"Could not save key file: {e}. Key will not persist across restarts.")
+    app.extensions['fleetops_vault'] = vault
 
 
 def get_vault() -> SecretsVault:

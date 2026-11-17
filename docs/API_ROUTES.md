@@ -1,0 +1,66 @@
+# FleetOps HTTP route inventory
+
+Generated from the 2.1.0 source decorators. Socket.IO events are documented in ICD.md.
+
+| Module | Route | Methods |
+|---|---|---|
+| app | `/auth/me` | GET |
+| app | `/auth/permissions` | GET |
+| app | `/help` | GET |
+| app | `/about` | GET |
+| app | `/healthz` | GET |
+| app | `/admin/` | GET |
+| app | `/` | GET |
+| app | `/logs` | GET |
+| app | `/login` | GET |
+| app | `/auth/login` | POST |
+| app | `/auth/logout` | POST |
+| app | `/auth/status` | GET |
+| app | `/vendor/codemirror/<path:filename>` | GET |
+| app | `/api/dashboard` | GET |
+| app | `/api/browse/playbooks` | GET |
+| app | `/api/browse/inventory` | GET |
+| app | `/api/playbooks` | GET |
+| app | `/api/playbooks/<path:name>` | GET |
+| app | `/api/playbooks/<path:name>` | PUT |
+| app | `/api/playbooks/<path:name>` | DELETE |
+| app | `/api/playbooks/run` | POST |
+| app | `/api/playbooks/validate` | POST |
+| app | `/api/playbooks/mkdir` | POST |
+| app | `/api/inventory` | GET |
+| app | `/api/inventory/<name>` | GET |
+| app | `/api/inventory/<name>` | PUT |
+| app | `/api/inventory/<name>` | DELETE |
+| app | `/api/schedules` | GET |
+| app | `/api/schedules` | POST |
+| app | `/api/schedules/<sid>` | DELETE |
+| app | `/api/schedules/<sid>/toggle` | POST |
+| app | `/api/reports` | GET |
+| app | `/api/reports/<name>` | GET |
+| app | `/api/reports/<name>` | DELETE |
+| app | `/adhoc` | GET |
+| app | `/api/adhoc` | POST |
+| app | `/hostcheck` | GET |
+| app | `/api/hostcheck` | POST |
+| app | `/api/logs` | GET |
+| app | `/api/logs/<path:name>` | GET |
+| app | `/ssh-console` | GET |
+| admin_routes | `/admin/users` | GET |
+| admin_routes | `/admin/users` | POST |
+| admin_routes | `/admin/users/<int:user_id>` | GET |
+| admin_routes | `/admin/users/<int:user_id>/roles` | PUT |
+| admin_routes | `/admin/users/<int:user_id>/disable` | POST |
+| admin_routes | `/admin/users/<int:user_id>/enable` | POST |
+| admin_routes | `/admin/users/<int:user_id>/reset-password` | POST |
+| admin_routes | `/admin/roles` | GET |
+| admin_routes | `/admin/roles/<int:role_id>/permissions` | PUT |
+| admin_routes | `/admin/audit-logs` | GET |
+| secrets_routes | `/admin/secrets` | GET |
+| secrets_routes | `/admin/secrets` | POST |
+| secrets_routes | `/admin/secrets/<int:secret_id>` | GET |
+| secrets_routes | `/admin/secrets/<int:secret_id>` | PUT |
+| secrets_routes | `/admin/secrets/<int:secret_id>` | DELETE |
+| secrets_routes | `/admin/secrets/by-name/<name>` | GET |
+
+| ssh_credentials | `/api/ssh-credentials` | GET, POST |
+| ssh_credentials | `/api/ssh-credentials/<int:credential_id>` | DELETE |

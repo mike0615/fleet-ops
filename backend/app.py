@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 =============================================================================
-mac-ops — Maytag Ansible Console Backend
+fleetops — Fleet Operations Console Backend
 =============================================================================
 Author  : Mike Anderson
 Version : 1.1.0
@@ -47,16 +47,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from models import db
 from auth import init_login_manager
-from auth_routes import register_auth_routes
+from config import get_config
+from auth_routes import get_current_user, get_permissions
+from admin_routes import register_admin_routes
+from secrets_routes import register_secrets_routes
+from vault import init_vault
+from ssh_credentials import register_ssh_credentials, resolve_credential
 
 # ─── Path layout ─────────────────────────────────────────────────────────────
 BASE        = Path(__file__).resolve().parent.parent
 FRONTEND    = BASE / "frontend"
-PLAYBOOKS   = BASE / "ansible" / "playbooks"
-INVENTORY   = BASE / "ansible" / "inventory"
-REPORTS     = BASE / "reports"
-LOGS        = BASE / "logs"
-SCHED_FILE  = BASE / "backend" / "schedules.json"
+DATA        = Path(os.environ.get("FLEETOPS_DATA_DIR", "/var/lib/fleetops"))
+PLAYBOOKS   = DATA / "ansible" / "playbooks"
+INVENTORY   = DATA / "ansible" / "inventory"
+REPORTS     = DATA / "reports"
+LOGS        = DATA / "logs"
+SCHED_FILE  = DATA / "schedules.json"
 
 for _d in [PLAYBOOKS, INVENTORY, REPORTS, LOGS]:
     _d.mkdir(parents=True, exist_ok=True)
@@ -69,14 +75,14 @@ def _configure_logging():
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             handlers=[
-                logging.FileHandler(LOGS / "mac-ops.log"),
+                logging.FileHandler(LOGS / "fleetops.log"),
                 logging.StreamHandler(sys.stdout),
             ],
         )
 
 _configure_logging()
-log = logging.getLogger("mac-ops")
-log.info("mac-ops v1.1.0 starting — Author: Mike Anderson")
+log = logging.getLogger("fleetops")
+log.info("FleetOps v2.1.0 starting — Author: Mike Anderson")
 
 # ─── Global App Instance ──────────────────────────────────────────────────────
 _app_instance = None
@@ -101,25 +107,18 @@ def _create_production_app():
     
     if _production_app is None:
         _production_app = Flask(__name__, static_folder=str(FRONTEND), static_url_path="")
-        CORS(_production_app)
-        _production_socketio = SocketIO(_production_app, cors_allowed_origins="*", 
+        # Browser requests use the same origin.
+        _production_socketio = SocketIO(_production_app, cors_allowed_origins=None, 
                                         async_mode='threading',
                                         logger=False, engineio_logger=False)
         _production_scheduler = BackgroundScheduler(daemon=True)
         _production_scheduler.start()
         
         # Configure database for production (will be initialized in create_app)
-        db_dir = Path('/var/lib/mac-ops')
-        if not db_dir.exists():
-            try:
-                db_dir.mkdir(parents=True, exist_ok=True)
-            except PermissionError:
-                db_dir = Path.home() / '.mac-ops'
-                db_dir.mkdir(parents=True, exist_ok=True)
-        db_path = db_dir / 'mac.db'
-        _production_app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+        _production_app.config['SQLALCHEMY_DATABASE_URI'] = get_config().get_database_url()
         _production_app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-        _production_app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
+        _production_app.config['SECRET_KEY'] = get_config().get_secret_key()
+        _production_app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(seconds=get_config().get_session_timeout())
         # Only set SECURE flag if running over HTTPS (check environment or scheme)
         is_https = os.environ.get('HTTPS', '').lower() in ('true', '1', 'yes') or os.environ.get('SCHEME') == 'https'
         _production_app.config['SESSION_COOKIE_SECURE'] = is_https
@@ -134,7 +133,10 @@ def _create_production_app():
         init_login_manager(_production_app, login_manager)
         
         # Register authentication routes
-        register_auth_routes(_production_app)
+        register_admin_routes(_production_app)
+        init_vault(_production_app)
+        register_secrets_routes(_production_app)
+        register_ssh_credentials(_production_app)
         
         # Initialize database
         with _production_app.app_context():
@@ -266,6 +268,42 @@ def register_schedule(s: dict) -> None:
 # ─── Initialize globals before defining routes ────────────────────────────────
 _init_globals()
 
+app.add_url_rule('/auth/me', view_func=get_current_user)
+app.add_url_rule('/auth/permissions', view_func=get_permissions)
+
+
+# Embedded documentation is available before login and never needs internet access.
+@app.route('/help')
+def fleetops_help():
+    return send_from_directory(str(FRONTEND), 'help.html')
+
+@app.route('/about')
+def fleetops_about():
+    return send_from_directory(str(FRONTEND), 'about.html')
+
+@app.route('/healthz')
+def healthz():
+    return jsonify(application='FleetOps', version='2.1.0', status='ok')
+
+@app.route('/admin/')
+def admin_page():
+    if not current_user.is_authenticated:
+        return send_from_directory(str(FRONTEND), 'login.html')
+    if not current_user.has_permission('admin', 'manage_users'):
+        return jsonify(error='Permission denied'), 403
+    return send_from_directory(str(FRONTEND / 'admin'), 'index.html')
+
+@app.before_request
+def protect_operations():
+    # The original application exposed several operational APIs anonymously.
+    if request.path.startswith('/api/'):
+        if any(part == '..' for part in request.path.split('/')) or '\\' in request.path:
+            return jsonify(error='Invalid path'), 400
+        if not current_user.is_authenticated:
+            return jsonify(error='Authentication required'), 401
+        action = 'view_playbooks' if request.method == 'GET' else 'execute_playbook'
+        if not current_user.has_permission('ansible', action):
+            return jsonify(error='Permission denied'), 403
 
 # ─── Static / index ───────────────────────────────────────────────────────────
 @app.route("/")
@@ -498,7 +536,7 @@ def save_playbook(name):
         return jsonify({"success": True})
     except PermissionError as exc:
         log.error("Permission denied saving playbook %s: %s", name, exc)
-        return jsonify({"error": f"Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/ansible"}), 500
+        return jsonify({"error": f"Permission denied — run: sudo chown -R fleetops:fleetops /var/lib/fleetops/ansible"}), 500
     except Exception as exc:
         log.error("Error saving playbook %s: %s", name, exc)
         return jsonify({"error": str(exc)}), 500
@@ -579,7 +617,7 @@ def save_inventory(name):
         return jsonify({"success": True})
     except PermissionError as exc:
         log.error("Permission denied saving inventory %s: %s", name, exc)
-        return jsonify({"error": f"Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/ansible"}), 500
+        return jsonify({"error": f"Permission denied — run: sudo chown -R fleetops:fleetops /var/lib/fleetops/ansible"}), 500
     except Exception as exc:
         log.error("Error saving inventory %s: %s", name, exc)
         return jsonify({"error": str(exc)}), 500
@@ -620,7 +658,7 @@ def create_schedule():
         register_schedule(s)
         return jsonify(s)
     except PermissionError:
-        return jsonify({"error": "Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/backend"}), 500
+        return jsonify({"error": "Permission denied — run: sudo chown -R fleetops:fleetops /var/lib/fleetops"}), 500
     except Exception as exc:
         log.exception("Error creating schedule")
         return jsonify({"error": str(exc)}), 500
@@ -637,7 +675,7 @@ def del_schedule(sid):
             pass
         return jsonify({"success": True})
     except PermissionError:
-        return jsonify({"error": "Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/backend"}), 500
+        return jsonify({"error": "Permission denied — run: sudo chown -R fleetops:fleetops /var/lib/fleetops"}), 500
     except Exception as exc:
         log.exception("Error deleting schedule %s", sid)
         return jsonify({"error": str(exc)}), 500
@@ -660,7 +698,7 @@ def toggle_schedule(sid):
         save_schedules(sl)
         return jsonify({"success": True})
     except PermissionError:
-        return jsonify({"error": "Permission denied — run: sudo chown -R macops:macops /opt/mac-ops/backend"}), 500
+        return jsonify({"error": "Permission denied — run: sudo chown -R fleetops:fleetops /var/lib/fleetops"}), 500
     except Exception as exc:
         log.exception("Error toggling schedule %s", sid)
         return jsonify({"error": str(exc)}), 500
@@ -708,7 +746,7 @@ for _s in load_schedules():
     if _s.get("enabled"):
         register_schedule(_s)
 
-log.info("mac-ops ready — %d schedule(s) loaded",
+log.info("fleetops ready — %d schedule(s) loaded",
          sum(1 for s in load_schedules() if s.get("enabled")))
 
 
@@ -888,6 +926,8 @@ def ssh_console_page():
 
 @socketio.on("connect", namespace="/ssh")
 def ssh_ws_connect():
+    if not current_user.is_authenticated or not current_user.has_permission('ansible', 'access_terminal'):
+        return False
     log.info("SSH WebSocket connected: %s", request.sid)
 
 
@@ -908,11 +948,22 @@ def ssh_ws_disconnect():
 @socketio.on("connect_ssh", namespace="/ssh")
 def ssh_ws_open(data):
     """Establish SSH connection and start background reader thread."""
-    sid      = request.sid
-    host     = data.get("host", "").strip()
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
-    port     = int(data.get("port", 22))
+    if not current_user.is_authenticated or not current_user.has_permission('ansible', 'access_terminal'):
+        emit('error', {'message': 'SSH permission required'})
+        return
+    sid = request.sid
+    try:
+        if data.get('credential_id') is not None:
+            data = resolve_credential(data['credential_id'], current_user.id)
+        host = data.get('host', '').strip()
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        port = int(data.get('port', 22))
+        if not 1 <= port <= 65535:
+            raise ValueError()
+    except Exception:
+        emit('error', {'message': 'Saved credential unavailable or invalid connection settings'})
+        return
 
     if not host or not username:
         emit("error", {"message": "Host and username are required"})
@@ -1015,5 +1066,6 @@ def ssh_ws_resize(data):
 # ─── Entry point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app_instance = create_app()
-    socketio.run(app_instance, host="0.0.0.0", port=5000, debug=False,
+    socketio.run(app_instance, host=os.environ.get("FLEETOPS_HOST", "127.0.0.1"),
+                 port=int(os.environ.get("FLEETOPS_PORT", "5000")), debug=False,
                  allow_unsafe_werkzeug=True)

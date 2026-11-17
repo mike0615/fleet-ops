@@ -35,7 +35,7 @@
     disk_crit_pct:  "{{ disk_crit_pct  | default(90)  | int }}"
     top_dir_count:  "{{ top_dir_count  | default(10)  | int }}"
     top_dir_path:   "{{ top_dir_path   | default('/') }}"
-    report_dir:     "/opt/mac-ops/reports"
+    report_dir:     "/var/lib/fleetops/reports"
     ts:             "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
     report_file:    "{{ report_dir }}/disk_{{ inventory_hostname }}_{{ ts }}.json"
 
@@ -151,7 +151,7 @@
     - name: Fetch report to controller
       fetch:
         src:  "{{ report_file }}"
-        dest: "/opt/mac-ops/reports/disk_{{ inventory_hostname }}_{{ ts }}.json"
+        dest: "/var/lib/fleetops/reports/disk_{{ inventory_hostname }}_{{ ts }}.json"
         flat: yes
 
     # ── Console output ────────────────────────────────────────────────────────

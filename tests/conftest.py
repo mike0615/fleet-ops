@@ -1,5 +1,8 @@
+import os
+from cryptography.fernet import Fernet
+os.environ.setdefault("FLEETOPS_SECRETS_KEY", Fernet.generate_key().decode())
 """
-Pytest configuration for MAC-ops tests.
+Pytest configuration for FleetOps tests.
 """
 
 import pytest
@@ -7,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Ensure backend is importable
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'backend'))
 
 # Suppress logging during tests
 import logging
@@ -17,8 +20,8 @@ logging.disable(logging.CRITICAL)
 @pytest.fixture
 def app(monkeypatch):
     """Create app for testing."""
-    from backend.app import create_app
-    import backend.models
+    from app import create_app
+    import models
     
     # Create fresh app for this test
     app = create_app(testing=True)
@@ -30,10 +33,10 @@ def app(monkeypatch):
         if 'sqlalchemy' in app.extensions:
             db = app.extensions['sqlalchemy']
         else:
-            from backend.models import db
+            from models import db
         
         # Monkeypatch the models db to use the test db
-        monkeypatch.setattr(backend.models, 'db', db)
+        monkeypatch.setattr(models, 'db', db)
         
         db.create_all()
         _create_test_data(db)
@@ -45,7 +48,7 @@ def app(monkeypatch):
         if 'sqlalchemy' in app.extensions:
             db = app.extensions['sqlalchemy']
         else:
-            from backend.models import db
+            from models import db
         db.session.remove()
         db.drop_all()
 
@@ -59,14 +62,14 @@ def client(app):
 def _create_test_data(db):
     """Create default test data."""
     import json
-    from backend.models import Role, Permission, AuditLog
+    from models import Role, Permission, AuditLog
     
     admin_role = Role(name='admin', description='Admin')
     operator_role = Role(name='operator', description='Operator')
     viewer_role = Role(name='viewer', description='Viewer')
     
     # Create permissions with resource and action
-    admin_perm = Permission(resource='ansible', action='admin', description='Admin access')
+    admin_perm = Permission(resource='ansible', action='view_playbooks', description='Admin access')
     read_perm = Permission(resource='ansible', action='read', description='Read-only')
     
     admin_role.permissions.append(admin_perm)

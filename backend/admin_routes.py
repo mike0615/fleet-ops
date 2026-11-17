@@ -1,5 +1,5 @@
 """
-Admin routes for Maytag Admin Console.
+Admin routes for FleetOps.
 Provides endpoints for user/role/permission management.
 """
 

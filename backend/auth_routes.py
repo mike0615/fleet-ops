@@ -1,5 +1,5 @@
 """
-Authentication routes for Maytag Admin Console.
+Authentication routes for FleetOps.
 Provides login/logout endpoints and session management.
 """
 

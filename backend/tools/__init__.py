@@ -1,5 +1,5 @@
 """
-Maytag Admin Console (MAC) Tools Framework.
+FleetOps Tools Framework.
 Provides a pluggable architecture for adding new administration tools.
 """
 

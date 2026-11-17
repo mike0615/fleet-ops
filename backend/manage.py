@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-CLI management tool for Maytag Admin Console (MAC).
+CLI management tool for FleetOps.
 Allows admin operations without web UI.
 """
 
@@ -15,12 +15,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 from flask import Flask
 from models import db, User, Role, init_db, create_default_roles
 from auth import create_user, validate_password
+from config import get_config
 
 
 def create_app():
     """Create Flask app for CLI."""
     app = Flask(__name__)
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////var/lib/mac-ops/mac.db'
+    app.config['SQLALCHEMY_DATABASE_URI'] = get_config().get_database_url()
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db.init_app(app)
     return app
@@ -29,17 +30,17 @@ def create_app():
 def cmd_create_admin(app):
     """Create initial admin user."""
     with app.app_context():
-        init_db(app)
+        db.create_all()
         create_default_roles(app)
 
         print("\n" + "="*50)
-        print("MAC Admin User Setup")
+        print("FleetOps Admin User Setup")
         print("="*50 + "\n")
 
         # Check if admin already exists
         admin_user = User.query.filter_by(username='admin').first()
         if admin_user:
-            print("✗ Admin user already exists")
+            print("âœ— Admin user already exists")
             return
 
         # Get credentials
@@ -47,24 +48,24 @@ def cmd_create_admin(app):
 
         # Check if username exists
         if User.query.filter_by(username=username).first():
-            print(f"✗ User '{username}' already exists")
+            print(f"âœ— User '{username}' already exists")
             return
 
         email = input(f"Enter email for {username}: ").strip()
         if not email:
-            print("✗ Email is required")
+            print("âœ— Email is required")
             return
 
         while True:
             password = getpass.getpass("Enter password: ")
             valid, msg = validate_password(password)
             if not valid:
-                print(f"✗ {msg}")
+                print(f"âœ— {msg}")
                 continue
 
             password_confirm = getpass.getpass("Confirm password: ")
             if password != password_confirm:
-                print("✗ Passwords do not match")
+                print("âœ— Passwords do not match")
                 continue
 
             break
@@ -72,17 +73,17 @@ def cmd_create_admin(app):
         # Create user
         admin_role = Role.query.filter_by(name='admin').first()
         if not admin_role:
-            print("✗ Admin role not found. Run 'mac-ops db init' first")
+            print("âœ— Admin role not found. Run 'fleetops db init' first")
             return
 
         user, msg = create_user(username, email, password, auth_method='local', roles=['admin'])
 
         if user:
-            print(f"\n✓ Admin user created successfully!")
+            print(f"\nâœ“ Admin user created successfully!")
             print(f"  Username: {username}")
             print(f"  Email: {email}")
         else:
-            print(f"\n✗ Failed to create admin user: {msg}")
+            print(f"\nâœ— Failed to create admin user: {msg}")
 
 
 def cmd_create_user(app):
@@ -94,12 +95,12 @@ def cmd_create_user(app):
 
         username = input("Enter username: ").strip()
         if not username:
-            print("✗ Username is required")
+            print("âœ— Username is required")
             return
 
         email = input("Enter email: ").strip()
         if not email:
-            print("✗ Email is required")
+            print("âœ— Email is required")
             return
 
         print("\nPassword requirements:")
@@ -110,7 +111,7 @@ def cmd_create_user(app):
             password = getpass.getpass("Enter password: ")
             valid, msg = validate_password(password)
             if not valid:
-                print(f"✗ {msg}")
+                print(f"âœ— {msg}")
                 continue
             break
 
@@ -126,19 +127,19 @@ def cmd_create_user(app):
                 if 1 <= choice <= len(roles):
                     role = roles[choice - 1]
                     break
-                print("✗ Invalid choice")
+                print("âœ— Invalid choice")
             except ValueError:
-                print("✗ Please enter a number")
+                print("âœ— Please enter a number")
 
         user, msg = create_user(username, email, password, auth_method='local', roles=[role.name])
 
         if user:
-            print(f"\n✓ User created successfully!")
+            print(f"\nâœ“ User created successfully!")
             print(f"  Username: {username}")
             print(f"  Email: {email}")
             print(f"  Role: {role.name}")
         else:
-            print(f"\n✗ Failed to create user: {msg}")
+            print(f"\nâœ— Failed to create user: {msg}")
 
 
 def cmd_list_users(app):
@@ -156,7 +157,7 @@ def cmd_list_users(app):
 
         for user in users:
             roles = ', '.join(r.name for r in user.roles) or 'none'
-            status = '✓' if user.enabled else '✗'
+            status = 'âœ“' if user.enabled else 'âœ—'
             print(f"{user.id:<5} {user.username:<20} {user.email:<30} {roles:<15} {status:<10}")
 
         print("="*80)
@@ -169,12 +170,12 @@ def cmd_disable_user(app):
         user = User.query.filter_by(username=username).first()
 
         if not user:
-            print(f"✗ User '{username}' not found")
+            print(f"âœ— User '{username}' not found")
             return
 
         user.enabled = False
         db.session.commit()
-        print(f"✓ User '{username}' disabled")
+        print(f"âœ“ User '{username}' disabled")
 
 
 def cmd_enable_user(app):
@@ -184,12 +185,12 @@ def cmd_enable_user(app):
         user = User.query.filter_by(username=username).first()
 
         if not user:
-            print(f"✗ User '{username}' not found")
+            print(f"âœ— User '{username}' not found")
             return
 
         user.enabled = True
         db.session.commit()
-        print(f"✓ User '{username}' enabled")
+        print(f"âœ“ User '{username}' enabled")
 
 
 def cmd_reset_password(app):
@@ -199,31 +200,31 @@ def cmd_reset_password(app):
         user = User.query.filter_by(username=username).first()
 
         if not user:
-            print(f"✗ User '{username}' not found")
+            print(f"âœ— User '{username}' not found")
             return
 
         password = getpass.getpass("Enter new password: ")
         from auth import validate_password
         valid, msg = validate_password(password)
         if not valid:
-            print(f"✗ {msg}")
+            print(f"âœ— {msg}")
             return
 
         user.set_password(password)
         db.session.commit()
-        print(f"✓ Password reset for user '{username}'")
+        print(f"âœ“ Password reset for user '{username}'")
 
 
 def cmd_init_db(app):
     """Initialize database."""
     with app.app_context():
         print("Initializing database...")
-        init_db(app)
-        print("✓ Database initialized")
+        db.create_all()
+        print("âœ“ Database initialized")
 
         print("Creating default roles...")
         create_default_roles(app)
-        print("✓ Default roles created")
+        print("âœ“ Default roles created")
 
 
 def main():
@@ -241,7 +242,7 @@ def main():
     }
 
     if len(sys.argv) < 2:
-        print("Maytag Admin Console (MAC) Management Tool\n")
+        print("FleetOps Management Tool\n")
         print("Usage: python manage.py <command>\n")
         print("Commands:")
         for cmd in sorted(commands.keys()):
@@ -250,16 +251,16 @@ def main():
 
     cmd = sys.argv[1]
     if cmd not in commands:
-        print(f"✗ Unknown command: {cmd}")
+        print(f"âœ— Unknown command: {cmd}")
         sys.exit(1)
 
     try:
         commands[cmd](app)
     except KeyboardInterrupt:
-        print("\n✗ Interrupted by user")
+        print("\nâœ— Interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"✗ Error: {e}")
+        print(f"âœ— Error: {e}")
         sys.exit(1)
 
 

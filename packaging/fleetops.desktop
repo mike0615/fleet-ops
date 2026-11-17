@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=FleetOps
+Comment=Infrastructure automation console
+Exec=fleetops
+Icon=fleetops
+Terminal=false
+Categories=System;Network;

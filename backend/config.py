@@ -1,5 +1,5 @@
 """
-Configuration management for Maytag Admin Console.
+Configuration management for FleetOps.
 Handles auth configuration, tool settings, and system configuration.
 """
 
@@ -17,7 +17,7 @@ class Config:
 
     # Default values
     DEFAULTS = {
-        'DATABASE_URL': 'sqlite:////var/lib/mac-ops/mac.db',
+        'DATABASE_URL': os.environ.get('FLEETOPS_DATABASE_URL', 'sqlite:///' + os.environ.get('FLEETOPS_DATA_DIR', '/var/lib/fleetops') + '/fleetops.db'),
         'SECRET_KEY': os.urandom(32).hex(),
         'SESSION_TIMEOUT': 30 * 60,  # 30 minutes in seconds
         'LDAP_ENABLED': False,
@@ -36,10 +36,10 @@ class Config:
         Initialize configuration.
 
         Args:
-            config_file: Path to config file (optional, defaults to /etc/mac-ops/mac.conf)
+            config_file: Path to config file (optional, defaults to /etc/fleetops/mac.conf)
         """
         self.config = self.DEFAULTS.copy()
-        self.config_file = config_file or '/etc/mac-ops/mac.conf'
+        self.config_file = config_file or os.environ.get('FLEETOPS_CONFIG', '/etc/fleetops/fleetops.conf')
 
         # Load from environment variables first
         self._load_from_env()
@@ -48,12 +48,15 @@ class Config:
         if Path(self.config_file).exists():
             self._load_from_file(self.config_file)
 
+        key_file = Path(os.environ.get('FLEETOPS_KEY_FILE', '/etc/fleetops/session.key'))
+        if key_file.exists() and 'FLEETOPS_SECRET_KEY' not in os.environ:
+            self.config['SECRET_KEY'] = key_file.read_text().strip()
         logger.info("Configuration loaded")
 
     def _load_from_env(self) -> None:
         """Load configuration from environment variables."""
         for key in self.DEFAULTS.keys():
-            env_key = f"MAC_{key}"
+            env_key = f"FLEETOPS_{key}"
             if env_key in os.environ:
                 value = os.environ[env_key]
                 # Convert string boolean values

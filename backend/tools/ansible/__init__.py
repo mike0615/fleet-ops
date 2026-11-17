@@ -1,5 +1,5 @@
 """
-Ansible Tool for Maytag Admin Console.
+Ansible Tool for FleetOps.
 Provides web UI for managing Ansible playbooks and automation.
 """
 
