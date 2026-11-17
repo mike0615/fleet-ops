@@ -1,5 +1,5 @@
 <!--
-  mac-ops — SSH Console
+  fleetops — SSH Console
   Author  : Mike Anderson
   Version : 1.1.0
   Deps    : xterm.js 5.3 (CDN), xterm-addon-fit 0.8 (CDN), socket.io 4.7 (CDN)
@@ -9,16 +9,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SSH Console — mac-ops</title>
+<title>SSH Console — fleetops</title>
 
 <!-- xterm.js + socket.io loaded from CDN -->
-<link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<link  rel="stylesheet" href="/vendor/xterm/xterm.css">
+<script src="/vendor/xterm/xterm.js"></script>
+<script src="/vendor/xterm/xterm-addon-fit.js"></script>
+<script src="/vendor/socket.io/socket.io.min.js"></script>
 
 <style>
-/* ── mac-ops dark theme ──────────────────────────────────────────────────── */
+/* ── fleetops dark theme ──────────────────────────────────────────────────── */
 :root{
   --bg0:#0d1117;--bg1:#161b22;--bg2:#1c2128;--bg3:#21262d;
   --text0:#e6edf3;--text1:#b0bec5;--text2:#656d76;
@@ -137,7 +137,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg0);color:var(--text0);f
   <span class="hdr-logo">🖥</span>
   <div>
     <div class="hdr-title">SSH Console</div>
-    <div class="hdr-sub">mac-ops — Maytag Ansible Console v1.1.0</div>
+    <div class="hdr-sub">fleetops — Fleet Operations Console v2.1.0</div>
   </div>
 </div>
 
@@ -352,7 +352,7 @@ function doConnect() {
 
   socket.on('connect_error', () => {
     isConnected = false;
-    showErr('Cannot reach the mac-ops backend. Is the service running?');
+    showErr('Cannot reach the fleetops backend. Is the service running?');
     btn.disabled    = false;
     btn.textContent = 'Connect';
     socket = null;
@@ -393,5 +393,6 @@ function setStatus(text, isOff) {
   });
 });
 </script>
+<script src="/vendor/fleetops-help.js"></script>
 </body>
 </html>

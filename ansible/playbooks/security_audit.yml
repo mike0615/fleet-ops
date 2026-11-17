@@ -17,7 +17,7 @@
   gather_facts: yes
   become: yes
   vars:
-    report_dir:  "/opt/mac-ops/reports"
+    report_dir:  "/var/lib/fleetops/reports"
     days_back:   7
     ts:          "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
     report_file: "{{ report_dir }}/security_{{ inventory_hostname }}_{{ ts }}.json"
@@ -319,7 +319,7 @@
     - name: Fetch to controller
       fetch:
         src:  "{{ report_file }}"
-        dest: "/opt/mac-ops/reports/security_{{ inventory_hostname }}_{{ ts }}.json"
+        dest: "/var/lib/fleetops/reports/security_{{ inventory_hostname }}_{{ ts }}.json"
         flat: yes
 
     - name: Done

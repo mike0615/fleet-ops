@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+case "${1:-}" in
+  --version) echo 'FleetOps 2.1.0' ;;
+  --help) cat /opt/fleetops/HELP.md ;;
+  manage) shift; exec /opt/fleetops/venv/bin/python /opt/fleetops/backend/manage.py "$@" ;;
+  serve) exec /opt/fleetops/venv/bin/python /opt/fleetops/backend/app.py ;;
+  '') exec xdg-open http://127.0.0.1:5000/ ;;
+  *) echo 'Usage: fleetops [--version | --help | manage COMMAND | serve]' >&2; exit 2 ;;
+esac

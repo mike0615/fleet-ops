@@ -1,5 +1,5 @@
 """
-Base class for Maytag Admin Console (MAC) tools.
+Base class for FleetOps tools.
 All tools inherit from this class to register with the tool framework.
 """
 
@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional
 
 
 class Tool(ABC):
-    """Base class for MAC tools."""
+    """Base class for FleetOps tools."""
 
     def __init__(self, name: str, icon: str = "wrench", description: str = ""):
         """
@@ -80,7 +80,7 @@ class Tool(ABC):
 
 
 class ToolRegistry:
-    """Registry for managing all MAC tools."""
+    """Registry for managing all FleetOps tools."""
 
     def __init__(self):
         """Initialize the tool registry."""

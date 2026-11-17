@@ -1,5 +1,5 @@
 """
-LDAP/FreeIPA authentication for Maytag Admin Console.
+LDAP/FreeIPA authentication for FleetOps.
 """
 
 import logging

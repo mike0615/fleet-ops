@@ -1,11 +1,11 @@
 """
-Integration tests for Maytag Admin Console authentication.
+Integration tests for FleetOps authentication.
 """
 
 import pytest
-from backend.models import db, User, Role, Permission, AuditLog, Secret
-from backend.auth import authenticate_local, create_user
-from backend.vault import SecretsVault
+from models import db, User, Role, Permission, AuditLog, Secret
+from auth import authenticate_local, create_user
+from vault import SecretsVault
 
 
 class TestAuthentication:
@@ -40,6 +40,7 @@ class TestRBAC:
         """Test checking user role."""
         with app.app_context():
             user = User(username='u', email='u@example.com', auth_method='local')
+            user.set_password('Password123')
             role = Role.query.filter_by(name='admin').first()
             user.roles.append(role)
             db.session.add(user)
@@ -51,6 +52,7 @@ class TestRBAC:
         """Test checking user permission."""
         with app.app_context():
             user = User(username='u', email='u@example.com', auth_method='local')
+            user.set_password('Password123')
             role = Role.query.filter_by(name='admin').first()
             user.roles.append(role)
             db.session.add(user)

@@ -7,7 +7,7 @@
 #            - All installed software with versions
 #            - Docker containers, images, and network details
 #            - Users, groups, services, performance snapshot
-# Output   : JSON report fetched back to AnsibleOps reports/
+# Output   : JSON report fetched back to FleetOps reports/
 ###############################################################
 
 - name: "System Inventory — Rocky 9"
@@ -15,7 +15,7 @@
   gather_facts: yes
   become: yes
   vars:
-    report_dir: "/opt/mac-ops/reports"
+    report_dir: "/var/lib/fleetops/reports"
     ts: "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
     report_file: "{{ report_dir }}/inventory_{{ inventory_hostname }}_{{ ts }}.json"
 
@@ -322,7 +322,7 @@
     - name: Fetch report to controller
       fetch:
         src:  "{{ report_file }}"
-        dest: "/opt/mac-ops/reports/inventory_{{ inventory_hostname }}_{{ ts }}.json"
+        dest: "/var/lib/fleetops/reports/inventory_{{ inventory_hostname }}_{{ ts }}.json"
         flat: yes
 
     - name: Done

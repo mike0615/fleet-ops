@@ -1,5 +1,5 @@
 """
-SQLAlchemy models for Maytag Admin Console (MAC).
+SQLAlchemy models for FleetOps.
 Includes User, Role, Permission, Secret, and other domain models.
 """
 

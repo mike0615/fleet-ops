@@ -1,5 +1,5 @@
 """
-Secrets API routes for Maytag Admin Console.
+Secrets API routes for FleetOps.
 Provides endpoints for managing encrypted secrets.
 """
 

@@ -1,5 +1,5 @@
 """
-Tool loader and manager for Maytag Admin Console.
+Tool loader and manager for FleetOps.
 Dynamically loads tools from the tools directory.
 """
 

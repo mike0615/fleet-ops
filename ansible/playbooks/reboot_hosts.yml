@@ -38,7 +38,7 @@
   vars:
     reboot_timeout: "{{ reboot_timeout | default(300) | int }}"
     skip_preflight: "{{ skip_preflight | default(false) | bool }}"
-    reboot_msg:     "{{ reboot_msg | default('System reboot initiated by Ansible — mac-ops') }}"
+    reboot_msg:     "{{ reboot_msg | default('System reboot initiated by Ansible — fleetops') }}"
     disk_warn_pct:  85
 
   pre_tasks:

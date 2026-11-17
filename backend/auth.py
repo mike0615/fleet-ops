@@ -1,5 +1,5 @@
 """
-Authentication module for Maytag Admin Console.
+Authentication module for FleetOps.
 Handles local and LDAP user authentication.
 """
 
@@ -52,7 +52,7 @@ class AuthenticatedUser(UserMixin):
 
 
 def init_login_manager(app, login_manager: LoginManager) -> None:
-    """Initialize Flask-Login with MAC."""
+    """Initialize Flask-Login with FleetOps."""
     login_manager.init_app(app)
     login_manager.login_view = 'login'
     login_manager.login_message = 'Please log in to access this page.'

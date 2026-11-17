@@ -1,0 +1,30 @@
+[Unit]
+Description=FleetOps infrastructure automation console
+Documentation=file:///opt/fleetops/docs/ADMIN_GUIDE.md
+After=network.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=fleetops
+Group=fleetops
+WorkingDirectory=/var/lib/fleetops
+EnvironmentFile=-/etc/fleetops/fleetops.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PATH=/opt/fleetops/venv/bin:/usr/bin:/bin
+Environment=ANSIBLE_CONFIG=/etc/fleetops/ansible.cfg
+Environment=HOME=/var/lib/fleetops
+ExecStart=/opt/fleetops/venv/bin/python /opt/fleetops/backend/app.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fleetops
+
+[Install]
+WantedBy=multi-user.target

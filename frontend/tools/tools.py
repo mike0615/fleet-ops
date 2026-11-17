@@ -1,5 +1,5 @@
 """
-Tools UI component for Maytag Admin Console frontend.
+Tools UI component for FleetOps frontend.
 Displays available tools based on user permissions.
 """
 

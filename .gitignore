@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.pyo
 *.pyd
@@ -41,3 +42,8 @@ logs/
 # lrn-pxe — extracted to its own repo; ignore any temp copies here
 lrn-pxe/
 lrn-pxe-project/
+
+# Binary deliverables are attached to releases, rather than source commits.
+releases/2.1.0/el9/
+releases/2.1.0/el10/
+releases/2.1.0/*.tar.gz
