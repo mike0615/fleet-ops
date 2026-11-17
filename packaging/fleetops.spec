@@ -2,7 +2,7 @@
 %global __os_install_post %{nil}
 Name: fleetops
 Version: 2.1.0
-Release: 1%{?dist}
+Release: 2%{?dist}
 Summary: Fleet infrastructure automation and Ansible operations console
 License: MIT
 URL: https://github.com/mike0615/mac-ops
@@ -80,6 +80,8 @@ fi
 %config(noreplace) %attr(0640,root,fleetops) /etc/fleetops/ansible.cfg
 
 %changelog
+* Mon Nov 16 2026 Mike Anderson <mike@andersoncomputer.us> - 2.1.0-2
+- Complete encrypted local SSH credentials, ownership checks and persistent vault initialization
 * Mon Nov 16 2026 Mike Anderson <mike@andersoncomputer.us> - 2.1.0-1
 - Rename MAC Ops to FleetOps; embedded Help and About
 - Bundle offline Python and Ansible runtime; preserve writable data on upgrades

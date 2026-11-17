@@ -1,6 +1,11 @@
 # FleetOps 2.1.0 — November 16, 2026
 
-First FleetOps release, based on MAC Ops 2.0.0.
+First published FleetOps release, based on MAC Ops 2.0.0. RPM release build 2 supersedes the initial draft build 1.
+
+- Completes local encrypted SSH credential saving and owner-scoped server-side reuse.
+- Initializes the persistent vault at startup and refuses missing or invalid keys.
+- Restricts general secret-by-name retrieval to authorized secret administrators.
+- Adds encryption, account isolation, restart recovery and saved-credential connection tests.
 
 - Renamed the application, RPM, service account, launcher and configuration paths.
 - Added embedded Help, F1 navigation and About with suite-style author/license information.

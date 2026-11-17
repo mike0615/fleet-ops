@@ -10,7 +10,7 @@ echo '# retain this local setting' >> /etc/fleetops/fleetops.conf
 sha256sum /etc/fleetops/session.key /etc/fleetops/vault.key /var/lib/fleetops/persistence-sentinel /etc/fleetops/fleetops.conf > /tmp/fleetops-before.sha256
 cd "/src/releases/2.1.0/el$major"
 bash install.sh
-rpm -Uvh --replacepkgs "rpms/fleetops-2.1.0-1.el$major.x86_64.rpm"
+rpm -Uvh --replacepkgs "rpms/fleetops-2.1.0-2.el$major.x86_64.rpm"
 sha256sum --check /tmp/fleetops-before.sha256
 runuser -u fleetops -- /opt/fleetops/venv/bin/python /opt/fleetops/backend/app.py > /tmp/fleetops-live.log 2>&1 &
 process=$!

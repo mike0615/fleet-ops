@@ -95,3 +95,20 @@ Each dist-tagged RPM contains a matching wheel set and dependency lock. The
 offline tar archive adds OS dependency RPMs, installer, documentation and
 SHA256SUMS. Do not combine EL9/EL10 wheels or RPM closures. The release notes
 identify changes; VALIDATION.md identifies qualification limits.
+
+## Encrypted SSH credential interface (release build 2)
+
+`GET /api/ssh-credentials` returns only the caller's credential IDs, labels,
+hosts, ports and usernames. It never returns passwords. `POST` accepts label,
+host, port, username and password; returns ID and label (201). Duplicate labels
+within an account return 409; invalid inputs return 400. `DELETE
+/api/ssh-credentials/<id>` deletes only a caller-owned entry, returning 404 for
+unknown or other-account IDs. Operational and SSH permissions apply to all routes.
+Cross-origin browser writes are rejected.
+
+The Socket.IO `connect_ssh` event accepts either manual connection settings or
+`credential_id`. With an ID, all connection settings are resolved server-side
+for the authenticated owner; supplied overrides are ignored. The new SQLite
+`ssh_credential` table is created automatically without replacing existing tables.
+Labels and ownership metadata are unencrypted; connection settings are encrypted
+as a single JSON value with the persistent Fernet key.

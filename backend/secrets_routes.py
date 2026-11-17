@@ -152,7 +152,7 @@ def delete_secret(secret_id: int):
 
 
 @secrets_bp.route('/by-name/<name>', methods=['GET'])
-@login_required
+@require_permission('admin', 'manage_secrets')
 def get_secret_by_name(name: str):
     """Get secret by name (for use in playbooks)."""
     secret = Secret.query.filter_by(name=name).first()

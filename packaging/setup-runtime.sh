@@ -7,6 +7,16 @@ install -d -m 0750 -o root -g fleetops /etc/fleetops
 install -d -m 0700 -o fleetops -g fleetops "$DATA"
 for name in session vault; do
   if [[ ! -s /etc/fleetops/$name.key ]]; then
+    if [[ $name == vault && -f "$DATA/fleetops.db" ]]; then
+      python3 - "$DATA/fleetops.db" <<'PY'
+import sqlite3, sys
+connection = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True)
+for table in ('secret', 'ssh_credential'):
+    exists = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+    if exists and connection.execute('SELECT 1 FROM ' + table + ' LIMIT 1').fetchone():
+        sys.exit('Vault key missing with saved secrets present. Restore the original key before upgrading.')
+PY
+    fi
     umask 077
     if [[ $name == session ]]; then
       python3 -c 'import secrets; print(secrets.token_hex(32))' > /etc/fleetops/session.key

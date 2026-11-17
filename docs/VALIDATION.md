@@ -10,7 +10,7 @@ Installation tests used fresh Rocky containers with `--network none`.
 | Resolved wheel installs and pip check | Passed on both OS versions |
 | Fresh offline installation, Ansible initially absent | Passed on both OS versions |
 | Existing usable Ansible detected by installer | Passed on both OS versions |
-| Installed application smoke suite | 5 tests passed per OS |
+| Installed application smoke suite | 7 tests passed per OS |
 | Service-account execution of smoke suite | Passed on both OS versions |
 | Login, viewer/admin authorization and anonymous socket rejection | Passed |
 | Localhost Ansible playbook execution | Passed on both OS versions |
@@ -39,3 +39,5 @@ no live MAC Ops deployment was changed during this work.
 The release is unsigned. Checksums verify artifact integrity, not publisher identity.
 The EL9 Ansible baseline and all dependencies need lifecycle/security review under
 your organization's patch policy. No compliance certification is claimed.
+
+Vault acceptance: password/host/username absent from plaintext database contents; saved password absent from API and socket responses; other accounts denied; ciphertext decrypts in a new process using the persisted key; server-side SSH credential resolution tested with a mocked transport; missing-key startup fails. Real SSH authentication with saved credentials remains a site acceptance step.

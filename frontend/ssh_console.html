@@ -148,6 +148,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg0);color:var(--text0);f
     <div class="conn-card">
       <div class="conn-hdr">🔐 Connect to Host</div>
 
+      <div class="fg">
+        <label class="fl" for="saved-credential">Saved credentials (encrypted on this server)</label>
+        <select class="fi" id="saved-credential" onchange="selectCredential()"><option value="">Enter credentials for this connection</option></select>
+      </div>
       <div class="row">
         <div class="fg">
           <label class="fl">Host / IP Address</label>
@@ -178,6 +182,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg0);color:var(--text0);f
         </div>
       </div>
 
+      <div class="fg"><label class="fl" for="credential-label">Name for saved credentials</label><input class="fi" id="credential-label" maxlength="128" placeholder="Example: Lab server"></div>
+      <div style="display:flex;gap:10px;margin-bottom:16px">
+        <button type="button" class="btn-disc" onclick="saveCredential()">Save encrypted credentials</button>
+        <button type="button" class="btn-disc" onclick="deleteCredential()">Delete selected credentials</button>
+      </div>
+      <p style="font-size:12px;color:#aab8c5">Saving is optional. Saved connection details are encrypted locally and belong to your FleetOps account. Saved passwords are never sent back to the browser.</p>
       <button class="btn-connect" id="conn-btn" onclick="doConnect()">
         Connect
       </button>
@@ -206,6 +216,49 @@ let term = null;
 let fitAddon = null;
 let socket   = null;
 let isConnected = false;
+let savedCredentials = [];
+async function loadCredentials(selected='') {
+  const response = await fetch('/api/ssh-credentials');
+  if (!response.ok) { showErr('Cannot load saved credentials. Check your SSH permission.'); return; }
+  savedCredentials = await response.json();
+  const select = document.getElementById('saved-credential');
+  select.replaceChildren(new Option('Enter credentials for this connection', ''));
+  for (const item of savedCredentials) select.add(new Option(item.label, String(item.id)));
+  select.value = String(selected); selectCredential();
+}
+function selectCredential() {
+  const id = document.getElementById('saved-credential').value;
+  const item = savedCredentials.find(c => String(c.id) === id);
+  for (const name of ['host','port','user','pass']) document.getElementById('inp-'+name).disabled = Boolean(item);
+  document.getElementById('credential-label').disabled = Boolean(item);
+  document.getElementById('inp-pass').value = '';
+  document.getElementById('inp-host').value = item ? item.host : '';
+  document.getElementById('inp-port').value = item ? item.port : 22;
+  document.getElementById('inp-user').value = item ? item.username : '';
+  document.getElementById('credential-label').value = item ? item.label : '';
+}
+async function saveCredential() {
+  clearErr();
+  if (document.getElementById('saved-credential').value) { showErr('Choose manual entry to save a new credential. Delete and recreate an entry to replace its password.'); return; }
+  const data = {label: document.getElementById('credential-label').value.trim(), host: document.getElementById('inp-host').value.trim(), port: Number(document.getElementById('inp-port').value), username: document.getElementById('inp-user').value.trim(), password: document.getElementById('inp-pass').value};
+  try {
+    const response = await fetch('/api/ssh-credentials', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    const result = await response.json();
+    if (!response.ok) { showErr(result.error || 'Unable to save credentials'); return; }
+    document.getElementById('inp-pass').value = '';
+    await loadCredentials(result.id);
+  } catch (_) { showErr('Unable to save credentials'); }
+}
+async function deleteCredential() {
+  const id = document.getElementById('saved-credential').value;
+  if (!id || !confirm('Delete these saved credentials?')) return;
+  try {
+    const response = await fetch('/api/ssh-credentials/'+id, {method:'DELETE'});
+    if (!response.ok) { showErr('Unable to delete credentials'); return; }
+    await loadCredentials();
+  } catch (_) { showErr('Unable to delete credentials'); }
+}
+document.addEventListener('DOMContentLoaded', () => loadCredentials());
 
 // ── xterm.js initialisation ─────────────────────────────────────────────────
 function initTerminal() {
@@ -285,6 +338,7 @@ function doConnect() {
   const port = parseInt(document.getElementById('inp-port').value) || 22;
   const user = document.getElementById('inp-user').value.trim();
   const pass = document.getElementById('inp-pass').value;
+  const credentialId = document.getElementById('saved-credential').value;
 
   clearErr();
   if (!host) { showErr('Host / IP address is required'); return; }
@@ -299,7 +353,8 @@ function doConnect() {
               { transports: ['websocket', 'polling'] });
 
   socket.on('connect', () => {
-    socket.emit('connect_ssh', { host, port, username: user, password: pass });
+    socket.emit('connect_ssh', credentialId ? {credential_id: Number(credentialId)} : {host, port, username:user, password:pass});
+    document.getElementById('inp-pass').value = '';
   });
 
   socket.on('connected', () => {

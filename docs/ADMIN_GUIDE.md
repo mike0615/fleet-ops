@@ -59,3 +59,28 @@ For SSH console errors, check browser WebSocket forwarding and internal TCP 22.
 The current SSH console retains automatic acceptance of new host keys. Do not use
 it when strict identity verification is required. Systemd hardening does not
 constrain tasks you explicitly authorize against remote hosts.
+
+
+## Saved SSH credentials
+
+SSH Console supports optional encrypted saving. Enter a label, host, port,
+username and password, then choose **Save encrypted credentials**. Choose that
+entry from the saved-credentials list on later visits and press Connect. Select
+manual entry to make a one-time connection without saving. To rotate a saved
+password, delete the old entry and save a replacement.
+
+Connection details, including the password, host, port and username, are encrypted
+with Fernet before insertion into the local SQLite database. Labels and ownership
+metadata remain readable; never put a password into a label. Each entry belongs
+to the FleetOps account that created it. Other accounts cannot list, delete or
+connect using that entry. Saved passwords are decrypted only on the server when
+connecting and are never returned to the browser. Credentials are not kept in
+browser local storage. SSH access permission is required.
+
+The persistent key is `/etc/fleetops/vault.key`, separate from the database and
+readable by root and the FleetOps service group. An explicit environment-key
+override is also supported. Startup fails if a persistent key is missing or
+invalid; it never silently substitutes a temporary key. Keep the key and database
+together in encrypted backups. Local encryption protects stored data but does
+not protect against root or compromise of the running service. Use the SSH tunnel
+or HTTPS to protect credential entry in transit.

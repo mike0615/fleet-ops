@@ -145,25 +145,16 @@ def init_vault(app) -> None:
     """Initialize the global secrets vault."""
     global vault
 
-    # Try to load key from file first
-    key_file = '/etc/fleetops/.secrets_key'
-    key = None
-
-    if os.path.exists(key_file):
-        try:
-            key = SecretsVault.load_key_from_file(key_file)
-        except Exception as e:
-            logger.error(f"Failed to load key from {key_file}: {e}")
-
-    # Initialize vault
+    key = os.environ.get('FLEETOPS_SECRETS_KEY')
+    if key:
+        key = key.encode('ascii')
+    else:
+        key_file = Path(os.environ.get('FLEETOPS_VAULT_KEY_FILE', '/etc/fleetops/vault.key'))
+        if not key_file.is_file():
+            raise RuntimeError('Persistent vault key is missing; restore it or run the installer. No temporary key will be used.')
+        key = key_file.read_bytes().strip()
     vault = SecretsVault(key)
-
-    # If key was generated, save it
-    if key is None:
-        try:
-            SecretsVault.save_key_to_file(vault.cipher._signing_key + vault.cipher._encryption_key, key_file)
-        except Exception as e:
-            logger.warning(f"Could not save key file: {e}. Key will not persist across restarts.")
+    app.extensions['fleetops_vault'] = vault
 
 
 def get_vault() -> SecretsVault:

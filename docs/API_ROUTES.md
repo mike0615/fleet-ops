@@ -61,3 +61,6 @@ Generated from the 2.1.0 source decorators. Socket.IO events are documented in I
 | secrets_routes | `/admin/secrets/<int:secret_id>` | PUT |
 | secrets_routes | `/admin/secrets/<int:secret_id>` | DELETE |
 | secrets_routes | `/admin/secrets/by-name/<name>` | GET |
+
+| ssh_credentials | `/api/ssh-credentials` | GET, POST |
+| ssh_credentials | `/api/ssh-credentials/<int:credential_id>` | DELETE |

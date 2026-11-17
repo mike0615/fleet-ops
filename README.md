@@ -15,6 +15,7 @@ The complete bundle includes the FleetOps RPM, the OS dependency RPMs, Python
 wheels, a private Ansible runtime, release notes and SHA-256 checksums.
 
 ```bash
+mkdir -p fleetops-release
 tar -xzf fleetops-2.1.0-el9-x86_64-offline.tar.gz -C fleetops-release
 cd fleetops-release
 sudo bash install.sh
@@ -73,3 +74,5 @@ See [build instructions](docs/BUILD_RELEASE.md) for validation and release rules
 
 MAC Ops remains the upstream GitHub repository URL until the remote repository
 is renamed. Application, RPM, service and configuration names are `fleetops`.
+
+Saved SSH credentials are optionally encrypted in the local vault, isolated by FleetOps account, and reused server-side without returning passwords to the browser. See Help for key backup requirements.

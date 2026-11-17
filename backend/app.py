@@ -51,6 +51,8 @@ from config import get_config
 from auth_routes import get_current_user, get_permissions
 from admin_routes import register_admin_routes
 from secrets_routes import register_secrets_routes
+from vault import init_vault
+from ssh_credentials import register_ssh_credentials, resolve_credential
 
 # ─── Path layout ─────────────────────────────────────────────────────────────
 BASE        = Path(__file__).resolve().parent.parent
@@ -132,7 +134,9 @@ def _create_production_app():
         
         # Register authentication routes
         register_admin_routes(_production_app)
+        init_vault(_production_app)
         register_secrets_routes(_production_app)
+        register_ssh_credentials(_production_app)
         
         # Initialize database
         with _production_app.app_context():
@@ -944,11 +948,22 @@ def ssh_ws_disconnect():
 @socketio.on("connect_ssh", namespace="/ssh")
 def ssh_ws_open(data):
     """Establish SSH connection and start background reader thread."""
-    sid      = request.sid
-    host     = data.get("host", "").strip()
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
-    port     = int(data.get("port", 22))
+    if not current_user.is_authenticated or not current_user.has_permission('ansible', 'access_terminal'):
+        emit('error', {'message': 'SSH permission required'})
+        return
+    sid = request.sid
+    try:
+        if data.get('credential_id') is not None:
+            data = resolve_credential(data['credential_id'], current_user.id)
+        host = data.get('host', '').strip()
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        port = int(data.get('port', 22))
+        if not 1 <= port <= 65535:
+            raise ValueError()
+    except Exception:
+        emit('error', {'message': 'Saved credential unavailable or invalid connection settings'})
+        return
 
     if not host or not username:
         emit("error", {"message": "Host and username are required"})

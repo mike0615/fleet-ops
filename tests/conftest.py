@@ -1,3 +1,6 @@
+import os
+from cryptography.fernet import Fernet
+os.environ.setdefault("FLEETOPS_SECRETS_KEY", Fernet.generate_key().decode())
 """
 Pytest configuration for FleetOps tests.
 """
