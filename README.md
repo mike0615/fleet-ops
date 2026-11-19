@@ -8,6 +8,8 @@ Ansible playbooks, inventory, cron schedules, reports, execution logs, host
 checks and SSH sessions. Local accounts, LDAP authentication, roles and an
 encrypted secrets vault are retained from MAC Ops.
 
+**Who it's for:** Administrators who run Ansible across a fleet and want a local browser interface for playbooks, inventory, schedules, reports and logs.
+
 ## Install
 
 Use the OS-specific offline release under [releases/](releases/README.md).
@@ -76,3 +78,7 @@ MAC Ops remains the upstream GitHub repository URL until the remote repository
 is renamed. Application, RPM, service and configuration names are `fleetops`.
 
 Saved SSH credentials are optionally encrypted in the local vault, isolated by FleetOps account, and reused server-side without returning passwords to the browser. See Help for key backup requirements.
+
+---
+
+**Part of the Cyber Chief toolkit** by Anderson Computer. Sibling projects: [Flagship](https://github.com/mike0615/flagship) · [Flagship Web](https://github.com/mike0615/flagship-web) · [Porthole](https://github.com/mike0615/porthole) · [Skiff](https://github.com/mike0615/skiff) · [Sonar](https://github.com/mike0615/sonar) · [Helm RDP](https://github.com/mike0615/helm-rdp) · [Pathfinder](https://github.com/mike0615/pathfinder) · [Dockyard](https://github.com/mike0615/dockyard) · [CommShack](https://github.com/mike0615/commshack).
