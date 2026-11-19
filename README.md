@@ -8,6 +8,12 @@ Ansible playbooks, inventory, cron schedules, reports, execution logs, host
 checks and SSH sessions. Local accounts, LDAP authentication, roles and an
 encrypted secrets vault are retained from MAC Ops.
 
+![FleetOps dashboard](docs/images/fleetops-dashboard.png)
+
+![FleetOps playbook editor](docs/images/fleetops-playbooks.png)
+
+*Screenshots: FleetOps 2.1.0 running locally with two sample playbooks and a sample inventory (example.test hosts, nothing executed).*
+
 ## Install
 
 Use the OS-specific offline release under [releases/](releases/README.md).
